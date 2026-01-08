@@ -4,60 +4,6 @@ import CoreLocation
 import UIKit
 import Foundation
 
-// MARK: - Global Tab Bar Appearance (fixes white tab bar when TabView is presented in a .sheet on iOS 16)
-
-/// Darker blue than `systemBlue` for consistent Menu + Waypoints nav/tab bars.
-/// Kept file-scoped + `private` to avoid naming collisions with similar constants in other files.
-private let bbMenuBlueUIColor_MVR = UIColor(red: 0.03, green: 0.23, blue: 0.48, alpha: 1.0)
-
-private func applyBBTabBarAppearance_MVR() {
-    let appearance = UITabBarAppearance()
-    appearance.configureWithOpaqueBackground()
-    appearance.backgroundColor = bbMenuBlueUIColor_MVR
-    appearance.shadowColor = UIColor.black.withAlphaComponent(0.70)
-
-    // Text/icon colors
-    let font = UIFont.systemFont(ofSize: 8, weight: .semibold)
-    let layouts: [UITabBarItemAppearance] = [
-        appearance.stackedLayoutAppearance,
-        appearance.inlineLayoutAppearance,
-        appearance.compactInlineLayoutAppearance
-    ]
-
-    for item in layouts {
-        item.normal.iconColor = UIColor.white.withAlphaComponent(0.75)
-        item.normal.titleTextAttributes = [
-            .foregroundColor: UIColor.white.withAlphaComponent(0.75),
-            .font: font
-        ]
-        item.selected.iconColor = UIColor.white
-        item.selected.titleTextAttributes = [
-            .foregroundColor: UIColor.white,
-            .font: font
-        ]
-    }
-
-    // Apply globally (must happen BEFORE the TabView is created)
-    let tabBar = UITabBar.appearance()
-    tabBar.isTranslucent = false
-    tabBar.standardAppearance = appearance
-    if #available(iOS 15.0, *) {
-        tabBar.scrollEdgeAppearance = appearance
-    }
-
-    // Extra force for stubborn cases
-    tabBar.backgroundColor = bbMenuBlueUIColor_MVR
-    tabBar.barTintColor = bbMenuBlueUIColor_MVR
-    tabBar.layer.backgroundColor = bbMenuBlueUIColor_MVR.cgColor
-
-    tabBar.tintColor = .white
-    tabBar.unselectedItemTintColor = UIColor.white.withAlphaComponent(0.75)
-
-    // “Shorter” feel
-    let item = UITabBarItem.appearance()
-    item.titlePositionAdjustment = UIOffset(horizontal: 0, vertical: -5)
-    item.imageInsets = UIEdgeInsets(top: -3, left: 0, bottom: 3, right: 0)
-}
 
 // MARK: - Waypoints model (FILE SCOPE so other views can use it)
 
@@ -84,35 +30,64 @@ struct MapViewRepresentable: UIViewRepresentable {
 
     let locationManager: LocationManager
 
-    // Outputs to SwiftUI HUD
     @Binding var distanceText: String
     @Binding var speedText: String
-
-    // meters per screen point (used by your SwiftUI scale bar)
     @Binding var metersPerPoint: Double
 
-    // Button triggers from SwiftUI
     @Binding var followUserRequest: Int
     @Binding var recenterRequest: Int
     @Binding var isFollowingUser: Bool
 
-    // Tide blend (0 = lowest/v1, 1 = low/v2)
     @Binding var tideBlend: Double
 
-    // Cursor (tap crosshair)
     @Binding var cursorCoordinate: CLLocationCoordinate2D?
     @Binding var cursorDistanceText: String
     @Binding var cursorCoordText: String
-
-    // Cursor pan request (triggered by SwiftUI when user enters coordinates)
     @Binding var cursorPanRequest: Int
 
-    // Waypoints to display on map
     @Binding var waypoints: [Waypoint]
+    let radioPins: [RadioGroupStore.Pin]
 
-    // Zoom button triggers from SwiftUI
     @Binding var zoomInRequest: Int
     @Binding var zoomOutRequest: Int
+
+
+    // MARK: - Explicit init (matches call-site labels)
+    init(
+        locationManager: LocationManager,
+        distanceText: Binding<String>,
+        speedText: Binding<String>,
+        metersPerPoint: Binding<Double>,
+        followUserRequest: Binding<Int>,
+        recenterRequest: Binding<Int>,
+        isFollowingUser: Binding<Bool>,
+        tideBlend: Binding<Double>,
+        cursorCoordinate: Binding<CLLocationCoordinate2D?>,
+        cursorDistanceText: Binding<String>,
+        cursorCoordText: Binding<String>,
+        cursorPanRequest: Binding<Int>,
+        waypoints: Binding<[Waypoint]>,
+        radioPins: [RadioGroupStore.Pin],
+        zoomInRequest: Binding<Int>,
+        zoomOutRequest: Binding<Int>
+    ) {
+        self.locationManager = locationManager
+        self._distanceText = distanceText
+        self._speedText = speedText
+        self._metersPerPoint = metersPerPoint
+        self._followUserRequest = followUserRequest
+        self._recenterRequest = recenterRequest
+        self._isFollowingUser = isFollowingUser
+        self._tideBlend = tideBlend
+        self._cursorCoordinate = cursorCoordinate
+        self._cursorDistanceText = cursorDistanceText
+        self._cursorCoordText = cursorCoordText
+        self._cursorPanRequest = cursorPanRequest
+        self._waypoints = waypoints
+        self.radioPins = radioPins
+        self._zoomInRequest = zoomInRequest
+        self._zoomOutRequest = zoomOutRequest
+    }
 
     // Zoom behavior
     private let minZForTiles: Int = 8
@@ -157,7 +132,6 @@ struct MapViewRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> MKMapView {
-        applyBBTabBarAppearance_MVR()
         let map = MKMapView()
         context.coordinator.mapView = map
         map.delegate = context.coordinator
@@ -201,10 +175,11 @@ struct MapViewRepresentable: UIViewRepresentable {
         context.coordinator.lastTideBlend = tideBlend
         context.coordinator.applyTideBlend(on: map, value: tideBlend)
 
-        // Initial cursor/waypoints
+        // Initial cursor/waypoints/radio pins
         context.coordinator.syncWaypointAnnotations(on: map, waypoints: waypoints)
+        context.coordinator.syncRadioPinAnnotations(on: map, pins: radioPins)
         context.coordinator.syncCursorAnnotation(on: map, cursor: cursorCoordinate)
-
+        context.coordinator.startPinFadeTimerIfNeeded()
         return map
     }
 
@@ -227,8 +202,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             context.coordinator.applyTideBlend(on: map, value: tideBlend)
         }
 
-        // cursor/waypoints sync
+        // cursor/waypoints/radio pins sync
         context.coordinator.syncWaypointAnnotations(on: map, waypoints: waypoints)
+        context.coordinator.syncRadioPinAnnotations(on: map, pins: radioPins)
         context.coordinator.syncCursorAnnotation(on: map, cursor: cursorCoordinate)
 
         // Cursor pan requests (ONE-SHOT center to the current cursorCoordinate)
@@ -557,9 +533,65 @@ struct MapViewRepresentable: UIViewRepresentable {
         // Waypoints annotations keyed by id
         private var waypointAnnotations: [UUID: WaypointAnnotation] = [:]
 
+        // Radio Group pin annotations keyed by id string
+        private var radioPinAnnotations: [String: RadioPinAnnotation] = [:]
+        // MARK: - Radio pin fade (all pins; live pins fade based on last update time)
+        private var pinFadeTimer: Timer?
+
+        func startPinFadeTimerIfNeeded() {
+            guard pinFadeTimer == nil else { return }
+
+            pinFadeTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+                guard let self, let mapView = self.mapView else { return }
+                self.refreshRadioPinColors(on: mapView)
+            }
+            RunLoop.main.add(pinFadeTimer!, forMode: .common)
+        }
+
+        deinit {
+            pinFadeTimer?.invalidate()
+            pinFadeTimer = nil
+        }
+
+        private func mix(_ a: UIColor, _ b: UIColor, t: CGFloat) -> UIColor {
+            let t = max(0, min(1, t))
+            var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+            var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+            a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+            b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+            return UIColor(
+                red: ar + (br - ar) * t,
+                green: ag + (bg - ag) * t,
+                blue: ab + (bb - ab) * t,
+                alpha: aa + (ba - aa) * t
+            )
+        }
+
+        private func tintColor(for pin: RadioPinAnnotation) -> UIColor {
+            // Live pins fade too (based on pin.createdAt, which for live pins is set to last-updated time)
+
+            // Pins fade in 6 steps (10 min each) -> fully gray at 60 min
+            let age = max(0, Date().timeIntervalSince(pin.createdAt))
+            let stepSeconds: TimeInterval = 10 * 60
+            let steps: Double = 6
+            let idx = min(Int(age / stepSeconds), Int(steps))
+            let t = CGFloat(Double(idx) / steps) // 0.0 ... 1.0
+
+            return mix(.systemGreen, .systemGray, t: t)
+        }
+
+        private func refreshRadioPinColors(on mapView: MKMapView) {
+            for (_, ann) in radioPinAnnotations {
+                if let v = mapView.view(for: ann) as? MKMarkerAnnotationView {
+                    v.markerTintColor = tintColor(for: ann)
+                }
+            }
+        }
+
         // Follow throttle
         private var lastFollowCenter: Date = .distantPast
-        private var didLaunchCenter: Bool = false
+        // One-time initial center/zoom on first good GPS fix
+        var didLaunchCenter: Bool = false
 
         // Boundaries
         var boundariesInstalled: Bool = false
@@ -822,18 +854,73 @@ struct MapViewRepresentable: UIViewRepresentable {
 
             for wp in waypoints {
                 if let ann = waypointAnnotations[wp.id] {
+                    // Update annotation in-place
                     ann.coordinate = wp.coordinate
                     ann.title = wp.displayName
+
+                    // ✅ Ensure the visible label updates immediately when name changes
+                    if let v = mapView.view(for: ann) as? WaypointAnnotationView {
+                        v.setLabel(ann.title ?? "")
+                    }
                 } else {
                     let ann = WaypointAnnotation(id: wp.id)
                     ann.coordinate = wp.coordinate
                     ann.title = wp.displayName
                     waypointAnnotations[wp.id] = ann
                     mapView.addAnnotation(ann)
+
+                    // ✅ After the view is created, set the label (MapKit may create it on the next runloop)
+                    DispatchQueue.main.async {
+                        if let v = mapView.view(for: ann) as? WaypointAnnotationView {
+                            v.setLabel(ann.title ?? "")
+                        }
+                    }
                 }
             }
         }
 
+        // MARK: - Radio Group pins sync
+
+        func syncRadioPinAnnotations(on mapView: MKMapView, pins: [RadioGroupStore.Pin]) {
+            // Use a string key so we don’t care if Pin.id is UUID/String/etc.
+            let wanted = Set(pins.map { String(describing: $0.id) })
+            let existing = Set(radioPinAnnotations.keys)
+
+            // Remove old pins
+            for id in existing.subtracting(wanted) {
+                if let ann = radioPinAnnotations[id] {
+                    mapView.removeAnnotation(ann)
+                }
+                radioPinAnnotations[id] = nil
+            }
+
+            // Add/update pins
+            for p in pins {
+                let id = String(describing: p.id)
+                let coord = p.coordinate
+
+                if let ann = radioPinAnnotations[id] {
+                    ann.coordinate = coord
+                    ann.title = p.titleText
+                    ann.subtitle = p.subtitleText
+                    ann.createdAt = p.createdAt
+                    ann.isLivePin = p.isLive
+                } else {
+                    let ann = RadioPinAnnotation(id: id)
+                    ann.coordinate = coord
+                    ann.title = p.titleText
+                    ann.subtitle = p.subtitleText
+                    ann.createdAt = p.createdAt
+                    ann.isLivePin = p.isLive
+                    radioPinAnnotations[id] = ann
+                    mapView.addAnnotation(ann)
+                }
+            }
+
+            // Apply correct tint immediately (timer handles ongoing fades)
+            refreshRadioPinColors(on: mapView)
+        }
+        
         // MARK: - Tide blending (egegik v1 <-> egegik_v2)
 
         func applyTideBlend(on mapView: MKMapView, value: Double) {
@@ -1057,13 +1144,15 @@ struct MapViewRepresentable: UIViewRepresentable {
                 refreshUserMarker(mapView)
                 return
             }
+
             dlog("didUpdateUserLocation isFollowing=\(isFollowingUser) allowFollowNow=\(allowFollowNow(on: mapView)) acc=\(loc.horizontalAccuracy) age=\(abs(loc.timestamp.timeIntervalSinceNow))")
 
-            if !didLaunchCenter, isGoodFix(loc) {
+            // ✅ One-time initial center/zoom when we get our first good fix
+            if !didLaunchCenter {
                 didLaunchCenter = true
                 let rect = mapRect(center: loc.coordinate, zoom: initialLaunchZoom, in: mapView)
                 withProgrammaticRegionChange(timeout: 1.2) {
-                    mapView.setCenter(loc.coordinate, animated: false)
+                    mapView.setVisibleMapRect(rect, animated: false)
                 }
             }
 
@@ -1262,6 +1351,19 @@ struct MapViewRepresentable: UIViewRepresentable {
         // MARK: - Annotation views
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let p = annotation as? RadioPinAnnotation {
+                let id = "RadioPinAnnotationView"
+                let v = mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: p, reuseIdentifier: id)
+
+                v.annotation = p
+                v.canShowCallout = true
+                v.displayPriority = .required
+                v.markerTintColor = tintColor(for: p)
+                v.glyphImage = UIImage(systemName: "antenna.radiowaves.left.and.right")
+                v.rightCalloutAccessoryView = UIButton(type: .detailDisclosure)
+                return v
+            }
 
             if annotation is MKUserLocation {
                 let v = mapView.dequeueReusableAnnotationView(
@@ -1421,7 +1523,7 @@ final class CourseTriangleUserView: MKAnnotationView {
     }
 }
 
-// MARK: - Cursor + Waypoint Annotations
+// MARK: - Cursor + Waypoint + Radio Pin Annotations
 
 final class CursorAnnotation: NSObject, MKAnnotation {
     dynamic var coordinate: CLLocationCoordinate2D = .init()
@@ -1433,6 +1535,23 @@ final class WaypointAnnotation: NSObject, MKAnnotation {
     dynamic var title: String?
 
     init(id: UUID) {
+        self.id = id
+        self.coordinate = .init()
+        super.init()
+    }
+}
+
+final class RadioPinAnnotation: NSObject, MKAnnotation {
+    let id: String
+    dynamic var coordinate: CLLocationCoordinate2D
+    dynamic var title: String?
+    dynamic var subtitle: String?
+
+    // Used for fade logic
+    var createdAt: Date = Date()
+    var isLivePin: Bool = false
+
+    init(id: String) {
         self.id = id
         self.coordinate = .init()
         super.init()
@@ -1517,6 +1636,21 @@ final class CursorAnnotationView: MKAnnotationView {
         shape.path = p.cgPath
     }
 }
+
+private extension RadioGroupStore.Pin {
+    var titleText: String {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        let t = f.string(from: createdAt)
+
+        let n = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty { return "Live location" }
+        return "\(n), \(t)"
+    }
+
+    var subtitleText: String { "" }
+}
 final class WaypointAnnotationView: MKAnnotationView {
     private let dot = CAShapeLayer()
     private let label = UILabel()
@@ -1600,6 +1734,5 @@ final class WaypointAnnotationView: MKAnnotationView {
         )
         
         canShowCallout = false
-        
-        }
     }
+}

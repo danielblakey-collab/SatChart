@@ -30,7 +30,7 @@ enum DistrictID: String, CaseIterable, Identifiable {
         case .egegik:
             return [
                 OfflinePack(district: self, slug: "egegik"),
-                OfflinePack(district: self, slug: "egegik_v2"),
+                OfflinePack(district: self, slug: "egegik_v2")
             ]
         default:
             return [defaultPack]

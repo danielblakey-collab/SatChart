@@ -23,13 +23,15 @@ enum MenuAppearance {
 
         // Dark “pill” behind selected item (NOT white)
         let indicatorFill = UIColor(red: 0.02, green: 0.18, blue: 0.40, alpha: 1.0)
-        appearance.selectionIndicatorImage = UIImage.selectionIndicator(
+        let indicator = UIImage.bbSelectionIndicator(
             fill: indicatorFill,
             stroke: UIColor.black.withAlphaComponent(0.70),
             lineWidth: 1,
             size: CGSize(width: 80, height: 30),
             cornerRadius: 12
-        ).resizableImage(
+        )
+
+        appearance.selectionIndicatorImage = indicator.resizableImage(
             withCapInsets: UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12),
             resizingMode: .stretch
         )
@@ -65,6 +67,11 @@ enum MenuAppearance {
         tabBar.tintColor = .white
         tabBar.unselectedItemTintColor = UIColor.white.withAlphaComponent(0.75)
 
+        // Extra force for stubborn cases
+        tabBar.backgroundColor = menuBlueUIColor
+        tabBar.barTintColor = menuBlueUIColor
+        tabBar.layer.backgroundColor = menuBlueUIColor.cgColor
+
         // “shorter” feel
         let item = UITabBarItem.appearance()
         item.titlePositionAdjustment = UIOffset(horizontal: 0, vertical: -5)
@@ -91,7 +98,7 @@ enum MenuAppearance {
 }
 
 private extension UIImage {
-    static func selectionIndicator(
+    static func bbSelectionIndicator(
         fill: UIColor,
         stroke: UIColor,
         lineWidth: CGFloat,

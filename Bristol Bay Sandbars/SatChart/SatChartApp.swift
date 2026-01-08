@@ -1,9 +1,11 @@
 import SwiftUI
+import FirebaseCore
 
 @main
-struct Bristol_Bay_SandbarsApp: App {
+struct SatChartApp: App {
 
     init() {
+        FirebaseApp.configure()
         MenuAppearance.applyAll()
     }
 

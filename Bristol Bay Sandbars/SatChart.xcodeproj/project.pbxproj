@@ -9,18 +9,22 @@
 /* Begin PBXBuildFile section */
 		2037099E2EF6B21400E53C8E /* MapTiles in Resources */ = {isa = PBXBuildFile; fileRef = 2037099D2EF6B21400E53C8E /* MapTiles */; };
 		203709D62EF8FA8D00E53C8E /* District_Boundaries_Final.geojson in Resources */ = {isa = PBXBuildFile; fileRef = 203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */; };
+		20370E0A2F0DDDB700E53C8E /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 20370E092F0DDDB700E53C8E /* FirebaseAuth */; };
+		20370E0C2F0DDDB700E53C8E /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */; };
+		20370E0E2F0DE49A00E53C8E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		203709702EF6B00200E53C8E /* SatChart.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SatChart.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2037099D2EF6B21400E53C8E /* MapTiles */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MapTiles; sourceTree = "<group>"; };
 		203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */ = {isa = PBXFileReference; lastKnownFileType = text; path = District_Boundaries_Final.geojson; sourceTree = "<group>"; };
+		20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		203709722EF6B00200E53C8E /* Bristol Bay Sandbars */ = {
+		203709722EF6B00200E53C8E /* SatChart */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Bristol Bay Sandbars";
+			path = SatChart;
 			sourceTree = "<group>";
 		};
 		203709852EF6B04A00E53C8E /* AOI */ = {
@@ -35,6 +39,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				20370E0A2F0DDDB700E53C8E /* FirebaseAuth in Frameworks */,
+				20370E0C2F0DDDB700E53C8E /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -44,9 +50,10 @@
 		203709672EF6B00200E53C8E = {
 			isa = PBXGroup;
 			children = (
+				20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */,
 				2037099D2EF6B21400E53C8E /* MapTiles */,
 				203709852EF6B04A00E53C8E /* AOI */,
-				203709722EF6B00200E53C8E /* Bristol Bay Sandbars */,
+				203709722EF6B00200E53C8E /* SatChart */,
 				203709712EF6B00200E53C8E /* Products */,
 				203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */,
 			);
@@ -76,11 +83,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				203709722EF6B00200E53C8E /* Bristol Bay Sandbars */,
+				203709722EF6B00200E53C8E /* SatChart */,
 				203709852EF6B04A00E53C8E /* AOI */,
 			);
 			name = SatChart;
 			packageProductDependencies = (
+				20370E092F0DDDB700E53C8E /* FirebaseAuth */,
+				20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */,
 			);
 			productName = "Bristol Bay Sandbars";
 			productReference = 203709702EF6B00200E53C8E /* SatChart.app */;
@@ -110,6 +119,9 @@
 			);
 			mainGroup = 203709672EF6B00200E53C8E;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 203709712EF6B00200E53C8E /* Products */;
 			projectDirPath = "";
@@ -127,6 +139,7 @@
 			files = (
 				2037099E2EF6B21400E53C8E /* MapTiles in Resources */,
 				203709D62EF8FA8D00E53C8E /* District_Boundaries_Final.geojson in Resources */,
+				20370E0E2F0DE49A00E53C8E /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -362,6 +375,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		20370E092F0DDDB700E53C8E /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 203709682EF6B00200E53C8E /* Project object */;
 }
