@@ -4,26 +4,82 @@ import CoreLocation
 import UIKit
 import Foundation
 
-
 // MARK: - Waypoints model (FILE SCOPE so other views can use it)
 
 struct Waypoint: Identifiable, Hashable {
     let id: UUID
-    var name: String          // default: "1", "2", "3"...
+    var name: String
     var notes: String
     var coordinate: CLLocationCoordinate2D
 
-    init(id: UUID = UUID(), name: String, notes: String = "", coordinate: CLLocationCoordinate2D) {
+    /// When the waypoint was created on this device.
+    var createdAt: Date
+
+    /// UI state: whether the user has sent this waypoint to the Radio Group.
+    var sentToGroup: Bool
+
+    /// True if this waypoint was received from another Radio Group member (not created on this device).
+    var isReceived: Bool
+
+    /// Sender info for received waypoints (empty for local).
+    var senderUid: String
+    var senderName: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        notes: String = "",
+        coordinate: CLLocationCoordinate2D,
+        createdAt: Date = Date(),
+        sentToGroup: Bool = false,
+        isReceived: Bool = false,
+        senderUid: String = "",
+        senderName: String = ""
+    ) {
         self.id = id
         self.name = name
         self.notes = notes
         self.coordinate = coordinate
+        self.createdAt = createdAt
+        self.sentToGroup = sentToGroup
+        self.isReceived = isReceived
+        self.senderUid = senderUid
+        self.senderName = senderName
     }
 
     var displayName: String { name }
 
     static func == (lhs: Waypoint, rhs: Waypoint) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+// MARK: - Shared Waypoint Annotation (for Radio Group received waypoints)
+
+final class SharedWaypointAnnotation: NSObject, MKAnnotation {
+    let id: String
+    dynamic var coordinate: CLLocationCoordinate2D
+    dynamic var title: String?
+    dynamic var subtitle: String?
+
+    // Used for coloring + legend/callout
+    var senderUid: String
+    var senderName: String
+
+    init(
+        id: String,
+        coordinate: CLLocationCoordinate2D,
+        title: String?,
+        subtitle: String?,
+        senderUid: String,
+        senderName: String
+    ) {
+        self.id = id
+        self.coordinate = coordinate
+        self.title = title
+        self.subtitle = subtitle
+        self.senderUid = senderUid
+        self.senderName = senderName
+        super.init()
+    }
 }
 
 struct MapViewRepresentable: UIViewRepresentable {
@@ -46,13 +102,12 @@ struct MapViewRepresentable: UIViewRepresentable {
     @Binding var cursorPanRequest: Int
 
     @Binding var waypoints: [Waypoint]
+    let receivedWaypoints: [RadioGroupStore.GroupWaypoint]
     let radioPins: [RadioGroupStore.Pin]
 
     @Binding var zoomInRequest: Int
     @Binding var zoomOutRequest: Int
 
-
-    // MARK: - Explicit init (matches call-site labels)
     init(
         locationManager: LocationManager,
         distanceText: Binding<String>,
@@ -67,6 +122,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         cursorCoordText: Binding<String>,
         cursorPanRequest: Binding<Int>,
         waypoints: Binding<[Waypoint]>,
+        receivedWaypoints: [RadioGroupStore.GroupWaypoint],
         radioPins: [RadioGroupStore.Pin],
         zoomInRequest: Binding<Int>,
         zoomOutRequest: Binding<Int>
@@ -84,9 +140,10 @@ struct MapViewRepresentable: UIViewRepresentable {
         self._cursorCoordText = cursorCoordText
         self._cursorPanRequest = cursorPanRequest
         self._waypoints = waypoints
+        self.receivedWaypoints = receivedWaypoints
         self.radioPins = radioPins
         self._zoomInRequest = zoomInRequest
-        self._zoomOutRequest = zoomOutRequest
+        self._zoomOutRequest = zoomOutRequest   // ✅ this exact spelling matters
     }
 
     // Zoom behavior
@@ -177,6 +234,7 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // Initial cursor/waypoints/radio pins
         context.coordinator.syncWaypointAnnotations(on: map, waypoints: waypoints)
+        context.coordinator.syncSharedWaypointAnnotations(on: map, waypoints: receivedWaypoints)
         context.coordinator.syncRadioPinAnnotations(on: map, pins: radioPins)
         context.coordinator.syncCursorAnnotation(on: map, cursor: cursorCoordinate)
         context.coordinator.startPinFadeTimerIfNeeded()
@@ -204,6 +262,7 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // cursor/waypoints/radio pins sync
         context.coordinator.syncWaypointAnnotations(on: map, waypoints: waypoints)
+        context.coordinator.syncSharedWaypointAnnotations(on: map, waypoints: receivedWaypoints)
         context.coordinator.syncRadioPinAnnotations(on: map, pins: radioPins)
         context.coordinator.syncCursorAnnotation(on: map, cursor: cursorCoordinate)
 
@@ -419,6 +478,28 @@ struct MapViewRepresentable: UIViewRepresentable {
             filteredCourseDegrees = nil
         }
 
+        private func sharedWaypointTint(for senderUid: String) -> UIColor {
+            // Stable deterministic hash (FNV-1a 64-bit). No red in palette.
+            let palette: [UIColor] = [
+                .systemGreen,
+                .systemOrange,
+                .systemYellow,
+                .systemPurple,
+                .systemTeal,
+                .systemMint,
+                .systemIndigo
+            ]
+
+            var hash: UInt64 = 14695981039346656037
+            let prime: UInt64 = 1099511628211
+            for b in senderUid.utf8 {
+                hash ^= UInt64(b)
+                hash &*= prime
+            }
+            let idx = Int(hash % UInt64(palette.count))
+            return palette[idx]
+        }
+        
         /// Returns true if it's safe to (re)engage Follow right now.
         /// We block Follow during gesture interaction and for a short suppression window
         /// to prevent "snap back" right after the user pans/zooms.
@@ -533,8 +614,59 @@ struct MapViewRepresentable: UIViewRepresentable {
         // Waypoints annotations keyed by id
         private var waypointAnnotations: [UUID: WaypointAnnotation] = [:]
 
+        // Shared waypoints (received from other Radio Group members)
+        private var sharedWaypointAnnotations: [String: SharedWaypointAnnotation] = [:]
+
+        // MARK: - Shared (received) waypoints sync
+        func syncSharedWaypointAnnotations(on mapView: MKMapView, waypoints: [RadioGroupStore.GroupWaypoint]) {
+            let wanted = Set(waypoints.map { $0.id })
+            let existing = Set(sharedWaypointAnnotations.keys)
+
+            // Remove missing
+            for id in existing.subtracting(wanted) {
+                if let ann = sharedWaypointAnnotations[id] {
+                    mapView.removeAnnotation(ann)
+                }
+                sharedWaypointAnnotations[id] = nil
+            }
+
+            // Add/update
+            for wp in waypoints {
+                let coord = wp.coordinate
+
+                let senderNameTrimmed = wp.senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let senderName = senderNameTrimmed.isEmpty ? "Member" : senderNameTrimmed
+
+                if let ann = sharedWaypointAnnotations[wp.id] {
+                    ann.coordinate = coord
+                    ann.title = wp.name
+                    ann.subtitle = senderName
+                    ann.senderUid = wp.senderUid
+                    ann.senderName = senderName
+
+                    // Refresh custom view immediately if it exists
+                    if let v = mapView.view(for: ann) as? SharedWaypointAnnotationView {
+                        v.setLabel(ann.title ?? "WP")
+                        v.setDotColor(sharedWaypointTint(for: ann.senderUid))
+                    }
+                } else {
+                    let ann = SharedWaypointAnnotation(
+                        id: wp.id,
+                        coordinate: coord,
+                        title: wp.name,
+                        subtitle: senderName,
+                        senderUid: wp.senderUid,
+                        senderName: senderName
+                    )
+                    sharedWaypointAnnotations[wp.id] = ann
+                    mapView.addAnnotation(ann)
+                }
+            }
+        }
+
         // Radio Group pin annotations keyed by id string
         private var radioPinAnnotations: [String: RadioPinAnnotation] = [:]
+        // (removed duplicate syncWaypointAnnotations)
         // MARK: - Radio pin fade (all pins; live pins fade based on last update time)
         private var pinFadeTimer: Timer?
 
@@ -1396,6 +1528,22 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return v
             }
 
+            if let sw = annotation as? SharedWaypointAnnotation {
+                let id = "SharedWaypointAnnotationView"
+                let v = mapView.dequeueReusableAnnotationView(withIdentifier: id) as? SharedWaypointAnnotationView
+                    ?? SharedWaypointAnnotationView(annotation: sw, reuseIdentifier: id)
+
+                v.annotation = sw
+                v.canShowCallout = true
+                v.displayPriority = .required
+
+                // Match local waypoint pin size/style, but color-coded per sender
+                v.setLabel(sw.title ?? "WP")
+                v.setDotColor(sharedWaypointTint(for: sw.senderUid))
+
+                return v
+            }
+
             return nil
         }
 
@@ -1574,7 +1722,7 @@ final class CursorAnnotationView: MKAnnotationView {
         // ✅ BLACK crosshairs, NO halo/shadow
         shape.strokeColor = UIColor.black.cgColor
         shape.fillColor = UIColor.clear.cgColor
-        shape.lineWidth = 1
+        shape.lineWidth = 2
         shape.lineCap = .butt
         shape.lineJoin = .miter
         shape.contentsScale = UIScreen.main.scale
@@ -1621,7 +1769,7 @@ final class CursorAnnotationView: MKAnnotationView {
         let b = bounds
         let cx = b.midX
         let cy = b.midY
-        let r: CGFloat = 8   // or whatever you’re using
+        let r: CGFloat = 9   // or whatever you’re using
 
         let p = UIBezierPath()
 
@@ -1650,6 +1798,93 @@ private extension RadioGroupStore.Pin {
     }
 
     var subtitleText: String { "" }
+}
+
+final class SharedWaypointAnnotationView: MKAnnotationView {
+    private let dot = CAShapeLayer()
+    private let label = UILabel()
+
+    private let dotSize: CGFloat = 10
+    private let dotX: CGFloat = 0
+    private let dotY: CGFloat = 22
+
+    private var dotUIColor: UIColor = .systemBlue
+
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+
+        frame = CGRect(x: 0, y: 0, width: 140, height: 34)
+
+        dot.fillColor = dotUIColor.cgColor
+        dot.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        dot.lineWidth = 1
+        layer.addSublayer(dot)
+
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        label.layer.cornerRadius = 6
+        label.layer.masksToBounds = true
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
+
+        // Make them stick at low zoom
+        displayPriority = .required
+        collisionMode = .circle
+        canShowCallout = true
+        clusteringIdentifier = nil
+
+        redraw()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        redraw()
+    }
+
+    func setLabel(_ text: String) {
+        label.text = text
+        setNeedsLayout()
+    }
+
+    func setDotColor(_ color: UIColor) {
+        dotUIColor = color
+        dot.fillColor = dotUIColor.cgColor
+        setNeedsLayout()
+    }
+
+    private func redraw() {
+        let txt = (label.text ?? "").isEmpty ? "WP" : (label.text ?? "")
+        label.text = txt
+
+        label.sizeToFit()
+        let labelW = min(max(label.bounds.width + 12, 36), 160)
+        let labelH: CGFloat = 20
+
+        let totalW = dotX + dotSize + 6 + labelW
+        let totalH: CGFloat = 34
+        bounds = CGRect(x: 0, y: 0, width: totalW, height: totalH)
+
+        let dotRect = CGRect(x: dotX, y: dotY, width: dotSize, height: dotSize)
+        dot.path = UIBezierPath(ovalIn: dotRect).cgPath
+
+        label.frame = CGRect(
+            x: dotX + dotSize + 6,
+            y: 6,
+            width: labelW,
+            height: labelH
+        )
+        label.textAlignment = .center
+
+        let dotCenter = CGPoint(x: dotRect.midX, y: dotRect.midY)
+        centerOffset = CGPoint(
+            x: (bounds.width / 2.0) - dotCenter.x,
+            y: (bounds.height / 2.0) - dotCenter.y
+        )
+    }
 }
 final class WaypointAnnotationView: MKAnnotationView {
     private let dot = CAShapeLayer()

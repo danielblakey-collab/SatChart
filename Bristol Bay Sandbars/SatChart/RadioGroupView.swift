@@ -61,7 +61,6 @@ struct RadioGroupView: View {
     @State private var showConfirmDeleteLastPin: Bool = false
     @State private var showConfirmDeleteAllPins: Bool = false
     @State private var confirmLeaveGroupId: String? = nil
-    @State private var confirmDeleteGroupId: String? = nil
 
     // MARK: - Multi-group state
     private struct RGMember: Identifiable, Hashable {
@@ -96,13 +95,75 @@ struct RadioGroupView: View {
         var createdAt: Date
     }
 
-    // MARK: - Colors (self-contained)
+    // MARK: - Colors
+    // Nav bar stays BB/Menu blue, but the page background uses the SatChart theme.
     private let menuBlueUIColor = UIColor(red: 0.03, green: 0.23, blue: 0.48, alpha: 1.0)
     private var menuBlue: Color { Color(uiColor: menuBlueUIColor) }
 
+    // Match scBackground (for UIKit background fixer)
+    private let scBackgroundUIColor = UIColor(red: 0.06, green: 0.07, blue: 0.09, alpha: 1.0)
+    private var scBackground: Color { Color(red: 0.06, green: 0.07, blue: 0.09) }
+    private var scSurface: Color { Color(red: 0.13, green: 0.14, blue: 0.18) }
+    private var scSurfaceAlt: Color { Color(red: 0.19, green: 0.20, blue: 0.25) }
+    private var scTextSecondary: Color { Color(red: 0.72, green: 0.74, blue: 0.78) }
+    private var scAccent: Color { Color(red: 0.28, green: 0.60, blue: 1.00) }
+
     // MARK: - Helpers
 
+
     private func erased<V: View>(_ view: V) -> AnyView { AnyView(view) }
+
+    // MARK: - UIKit background fixer (kills the white strip above the tab bar)
+    private struct HostingBackgroundFixer: UIViewRepresentable {
+        let color: UIColor
+
+        func makeUIView(context: Context) -> UIView {
+            FixView(color: color)
+        }
+
+        func updateUIView(_ uiView: UIView, context: Context) {
+            (uiView as? FixView)?.color = color
+            (uiView as? FixView)?.apply()
+        }
+
+        private final class FixView: UIView {
+            var color: UIColor
+
+            init(color: UIColor) {
+                self.color = color
+                super.init(frame: .zero)
+                backgroundColor = .clear
+                isUserInteractionEnabled = false
+            }
+
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+
+            override func didMoveToSuperview() {
+                super.didMoveToSuperview()
+                apply()
+            }
+
+            override func layoutSubviews() {
+                super.layoutSubviews()
+                apply()
+            }
+
+            func apply() {
+                // Apply on next runloop to ensure we have a superview chain.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+
+                    // Paint a couple levels up; this typically covers the UIHostingController root + container.
+                    self.superview?.backgroundColor = self.color
+                    self.superview?.superview?.backgroundColor = self.color
+                    self.superview?.superview?.superview?.backgroundColor = self.color
+                }
+            }
+        }
+    }
+
 
     private func showToast(_ text: String, seconds: TimeInterval = 3.0) {
         toastHideWork?.cancel()
@@ -145,8 +206,9 @@ struct RadioGroupView: View {
 
     private func nameWithCount(uid: String, name: String) -> String {
         let n = memberGroupCounts[uid] ?? 0
-        if n <= 0 { return name }
-        return "\(name), \(n) Radio Groups"
+        // If they're only in 0–1 groups, show just the name.
+        guard n > 1 else { return name }
+        return "\(name) (\(n) Groups)"
     }
 
     private func generateInviteCodeValue() -> String {
@@ -201,7 +263,41 @@ struct RadioGroupView: View {
         if groupDocListeners[gid] == nil {
             groupDocListeners[gid] = db.collection("groups").document(gid)
                 .addSnapshotListener { snap, _ in
-                    let data = snap?.data() ?? [:]
+                    // ✅ If group doc is deleted, remove it from UI entirely.
+                    guard let snap, snap.exists else {
+                        // Stop listeners for this group
+                        groupDocListeners[gid]?.remove()
+                        groupDocListeners[gid] = nil
+
+                        groupMembersListeners[gid]?.remove()
+                        groupMembersListeners[gid] = nil
+
+                        groupJoinRequestsListeners[gid]?.remove()
+                        groupJoinRequestsListeners[gid] = nil
+
+                        // Remove local cached group + pending approvals
+                        groupsById[gid] = nil
+                        pendingJoinRequestsByGroup[gid] = nil
+
+                        // If this was the active group, clear active pins group
+                        if radioGroupId == gid {
+                            radioGroupId = ""
+                            radioGroup.setGroupId("")
+                        }
+
+                        // ✅ Also remove this groupId from "myGroupIds" if it is still present locally
+                        myGroupIds.removeAll { $0 == gid }
+
+                        // ✅ Optional: try to remove membership doc for *this* user so it won’t reappear
+                        ensureAnonAuth {
+                            guard let uid = currentUid() else { return }
+                            db.collection("users").document(uid).collection("memberships").document(gid).delete()
+                        }
+
+                        return
+                    }
+
+                    let data = snap.data() ?? [:]
                     let name = (data["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Radio Group"
                     let code = (data["inviteCode"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     var g = groupsById[gid] ?? RGGroup(id: gid, name: name, inviteCode: code, members: [])
@@ -442,13 +538,6 @@ struct RadioGroupView: View {
         }
     }
 
-    private func deleteGroup(gid: String) {
-        ensureAnonAuth {
-            db.collection("groups").document(gid).delete()
-            leaveGroup(gid: gid)
-            showToast("Radio Group deleted.", seconds: 3.0)
-        }
-    }
 
     // MARK: - Info Row Helper
 
@@ -462,15 +551,15 @@ struct RadioGroupView: View {
     ) -> some View {
         HStack(spacing: 10) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(scTextSecondary)
                 .frame(width: 110, alignment: .leading)
                 .lineLimit(1)
 
             TextField("", text: text, prompt: Text("Enter \(label.lowercased())").foregroundColor(.gray))
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled(true)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(locked.wrappedValue ? .white : .black)
                 .tint(locked.wrappedValue ? .white : .black)
                 .padding(.horizontal, 10)
@@ -520,7 +609,7 @@ struct RadioGroupView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .underline()
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 17, weight: .semibold))
             .foregroundColor(.white)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 4)
@@ -555,69 +644,131 @@ struct RadioGroupView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(Color.black.opacity(0.35))
+        .background(scSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+        )
     }
 
     @ViewBuilder
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("My Status")
+
             HStack {
                 Text("Live sharing")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(scTextSecondary)
+
                 Spacer()
+
                 Text(radioGroup.isLiveSharing ? "ON" : "OFF")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
                     .foregroundColor(radioGroup.isLiveSharing ? .green : .red)
             }
+
             HStack {
                 Text("Last location sent")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(scTextSecondary)
+
                 Spacer()
+
                 Text(radioGroup.lastSentText)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.85))
             }
+            .padding(.top, 8)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(Color.black.opacity(0.35))
+        .background(scSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+        )
     }
 
     @ViewBuilder
     private var pinsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Location Pins and Live Location")
-            Picker("Location Pin Expires After", selection: $pinSettings.expiry) {
-                ForEach(PinExpiryOption.allCases) { opt in
-                    Text(opt.label).tag(opt)
+            HStack {
+                Text("Location Pin Expires After")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(scTextSecondary)
+
+                Spacer(minLength: 10)
+
+                Picker("", selection: $pinSettings.expiry) {
+                    ForEach(PinExpiryOption.allCases) { opt in
+                        Text(opt.label).tag(opt)
+                    }
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
-            .pickerStyle(.menu)
-            Picker("Live Location Sharing Updated", selection: $liveLocationUpdateOptionRaw) {
-                ForEach(LiveLocationUpdateOption.allCases) { opt in
-                    Text(opt.label).tag(opt.rawValue)
+
+            HStack {
+                Text("Live Location Sharing Updated")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(scTextSecondary)
+
+                Spacer(minLength: 10)
+
+                Picker("", selection: $liveLocationUpdateOptionRaw) {
+                    ForEach(LiveLocationUpdateOption.allCases) { opt in
+                        Text(opt.label).tag(opt.rawValue)
+                    }
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
-            .pickerStyle(.menu)
+
             Button(role: .destructive) { showConfirmDeleteLastPin = true } label: {
                 Label("Delete last pin", systemImage: "trash")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(scSurfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    )
             }
+            .buttonStyle(.plain)
+
             Button(role: .destructive) { showConfirmDeleteAllPins = true } label: {
                 Label("Delete all pins", systemImage: "trash.slash")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(scSurfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    )
             }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(Color.black.opacity(0.35))
+        .background(scSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+        )
     }
 
     @ViewBuilder
@@ -625,70 +776,140 @@ struct RadioGroupView: View {
         if isPendingJoin {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Request Pending to join \"\(pendingJoinGroupName.isEmpty ? "Radio Group" : pendingJoinGroupName)\"")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.yellow)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 6)
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 12)
-            .background(Color.black.opacity(0.35))
+            .background(scSurface)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+            )
         }
     }
 
     @ViewBuilder
     private func groupCard(for gid: String) -> some View {
         if let g = groupsById[gid] {
+
+            // Determine founder/admin display name
+            let adminMember = g.members.first(where: { $0.role.lowercased() == "admin" })
+            let founderName: String = (adminMember?.name.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (g.members.first?.name.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? "—"
+
+            // Members excluding founder/admin (for Member 2, 3, ...)
+            let otherMembers: [RGMember] = {
+                if let adminId = adminMember?.id {
+                    return g.members.filter { $0.id != adminId }
+                } else {
+                    guard let firstId = g.members.first?.id else { return [] }
+                    return g.members.filter { $0.id != firstId }
+                }
+            }()
+
+            // Status
+            let isSelected = (radioGroupId == gid)
+            let isEligible = (g.members.count >= 2)
+
             VStack(alignment: .leading, spacing: 10) {
 
-                Button {
-                    setActivePinsGroup(gid)
-                } label: {
-                    HStack {
-                        Text(g.name)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.blue)
+                // Top bar: Group Name
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Group Name:")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
 
-                        Spacer()
+                    Text(g.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
 
-                        let isSelected = (radioGroupId == gid)
-                        let isEligible = (g.members.count >= 2)
+                    Spacer(minLength: 0)
+                }
 
-                        if isSelected && isEligible {
-                            Text("Active")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.green.opacity(0.80))
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                // Status bar: Active/Inactive + helper text
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Status:")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Button {
+                        if isSelected {
+                            // Clear active group
+                            radioGroupId = ""
+                            radioGroup.setGroupId("")
+                            showToast("Active group cleared.", seconds: 2.0)
                         } else {
-                            Text("Inactive")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            guard isEligible else {
+                                showToast("Location sharing is enabled when your active Radio Group has at least 2 members.", seconds: 3.0)
+                                return
+                            }
+                            setActivePinsGroup(gid)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isSelected && isEligible {
+                                Text("Active")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.green.opacity(0.80))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                                Text("(Sharing enabled)")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.white.opacity(0.75))
+                            } else {
+                                Text("Inactive")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.80))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                                Text("(Select to allow sharing)")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.white.opacity(0.75))
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Group Founder:")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text(founderName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                    Spacer(minLength: 0)
+                }
+
+                // Member rows: Member 2, Member 3, ...
+                if !otherMembers.isEmpty {
+                    ForEach(Array(otherMembers.enumerated()), id: \.offset) { idx, m in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("Member \(idx + 2):")
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.red.opacity(0.80))
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            Text(nameWithCount(uid: m.id, name: m.name))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                            Spacer(minLength: 0)
                         }
                     }
                 }
-                .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Members")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.85))
-
-                    ForEach(g.members) { m in
-                        Text(nameWithCount(uid: m.id, name: m.name))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.90))
-                    }
-                }
-
+                // Pending approvals (admin only)
                 if let uid = currentUid(),
                    let me = g.members.first(where: { $0.id == uid }),
                    me.role == "admin",
@@ -696,13 +917,13 @@ struct RadioGroupView: View {
                    !pending.isEmpty {
 
                     Text("Pending join requests")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white.opacity(0.85))
 
                     ForEach(pending) { req in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(req.requestedByName)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(.white)
 
                             HStack(spacing: 10) {
@@ -734,37 +955,35 @@ struct RadioGroupView: View {
                     showInviteCode = true
                     showToast("Invite code created.", seconds: 2.2)
                 } label: {
-                    Text("Invite New Member").frame(maxWidth: .infinity)
+                    Text("Invite New Member")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(scAccent)
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
+                .buttonStyle(.bordered)
+                .tint(.gray)
 
                 Button {
                     confirmLeaveGroupId = gid
                 } label: {
                     Text("Leave Radio Group")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.red)
                         .frame(maxWidth: .infinity)
-                        .foregroundColor(.yellow)
                 }
                 .buttonStyle(.bordered)
                 .tint(.gray)
 
-                if let uid = currentUid(),
-                   let me = g.members.first(where: { $0.id == uid }),
-                   me.role == "admin" {
-
-                    Button {
-                        confirmDeleteGroupId = gid
-                    } label: {
-                        Text("Delete Radio Group")
-                            .frame(maxWidth: .infinity)
-                            .foregroundColor(.red)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.gray)
-                }
             }
-            .padding(.vertical, 6)
+            // ✅ Outline around each radio group card
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .background(scSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+            )
         }
     }
 
@@ -779,16 +998,23 @@ struct RadioGroupView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 8)
             } else {
-                ForEach(myGroupIds, id: \.self) { gid in
+                ForEach(Array(myGroupIds.enumerated()), id: \.element) { idx, gid in
                     groupCard(for: gid)
+                        // 1-bar space under the header for the first card
+                        .padding(.top, idx == 0 ? 8 : 0)
+                        // 2-bar space between subsequent cards
+                        .padding(.top, idx == 0 ? 0 : 16)
                 }
             }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(Color.black.opacity(0.35))
+        .background(scSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+        )
     }
 
     @ViewBuilder
@@ -801,26 +1027,33 @@ struct RadioGroupView: View {
                 createAdminLastNameInput = userLastName
                 showCreateFlow = true
             } label: {
-                Text("Create Radio Group").frame(maxWidth: .infinity)
+                Text("Create Radio Group")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.blue)
+            .tint(scAccent)
             Button {
                 joinMemberFirstNameInput = userFirstName
                 joinMemberLastNameInput = userLastName
                 joinCodeInput = ""
                 showJoinFlow = true
             } label: {
-                Text("Join Existing Radio Group").frame(maxWidth: .infinity)
+                Text("Join Existing Radio Group")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.blue)
+            .tint(scAccent)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
-        .background(Color.black.opacity(0.35))
+        .background(scSurface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
+        )
     }
 
     private var listBody: some View {
@@ -835,11 +1068,13 @@ struct RadioGroupView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 24)
+            // Extra space so the last card doesn’t sit on top of the Tab Bar.
+            .padding(.bottom, 96)
         }
-        .background(Color.black)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .modifier(HideScrollIndicatorsIfAvailable())
+        .background(scBackground.ignoresSafeArea())
+        .ignoresSafeArea(.container, edges: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // Helper modifier to hide scroll indicators if available (iOS 16+)
@@ -855,7 +1090,7 @@ struct RadioGroupView: View {
 
     private var baseChrome: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            scBackground.ignoresSafeArea()
             listBody
         }
         .environment(\.colorScheme, .dark)
@@ -884,7 +1119,7 @@ struct RadioGroupView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.85))
+                        .background(scSurface.opacity(0.95))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -914,7 +1149,7 @@ struct RadioGroupView: View {
                         .lineLimit(3)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
-                        .background(Color(white: 0.85).opacity(0.95))
+                        .background(scSurfaceAlt)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -931,8 +1166,17 @@ struct RadioGroupView: View {
     // MARK: - Body
 
     var body: some View {
-        toastsOverlay
-            .onAppear {
+        ZStack {
+            scBackground.ignoresSafeArea()
+
+            // Force the underlying hosting/container views to black (removes the white strip)
+            HostingBackgroundFixer(color: scBackgroundUIColor)
+                .frame(width: 0, height: 0)
+
+            toastsOverlay
+        }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .onAppear {
                 MenuAppearance.applyNavBar()
                 startMyMembershipsListener()
 
@@ -969,17 +1213,17 @@ struct RadioGroupView: View {
                     }
                 }
             }
-            .onDisappear {
-                myJoinRequestListener?.remove()
-                myJoinRequestListener = nil
+        .onDisappear {
+            myJoinRequestListener?.remove()
+            myJoinRequestListener = nil
+        }
+        .onChange(of: pendingJoinGroupId) { _ in
+            if isPendingJoin {
+                attachMyJoinRequestListener()
             }
-            .onChange(of: pendingJoinGroupId) { _ in
-                if isPendingJoin {
-                    attachMyJoinRequestListener()
-                }
-            }
-            // Sheets / dialogs must live on the root view so they keep working.
-            .sheet(isPresented: $showInviteCode) {
+        }
+        // Sheets / dialogs must live on the root view so they keep working.
+        .sheet(isPresented: $showInviteCode) {
                 VStack(spacing: 16) {
                     Text("Invite Code")
                         .font(.system(size: 18, weight: .bold))
@@ -1005,7 +1249,7 @@ struct RadioGroupView: View {
                             Text("Copy").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.blue)
+                        .tint(scAccent)
 
                         Button { showInviteCode = false } label: {
                             Text("Close").frame(maxWidth: .infinity)
@@ -1016,7 +1260,7 @@ struct RadioGroupView: View {
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
+                .background(scBackground.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)
             }
             .sheet(isPresented: $showCreateFlow) {
@@ -1071,7 +1315,7 @@ struct RadioGroupView: View {
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
+                .background(scBackground.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)
             }
             .sheet(isPresented: $showJoinFlow) {
@@ -1126,7 +1370,7 @@ struct RadioGroupView: View {
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
+                .background(scBackground.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)
             }
             .confirmationDialog("Delete last location pin?", isPresented: $showConfirmDeleteLastPin, titleVisibility: .visible) {
@@ -1159,23 +1403,6 @@ struct RadioGroupView: View {
                     confirmLeaveGroupId = nil
                 }
                 Button("Cancel", role: .cancel) { confirmLeaveGroupId = nil }
-            }
-            .confirmationDialog(
-                confirmDeleteGroupId.flatMap { gid in
-                    let name = groupsById[gid]?.name ?? "Radio Group"
-                    return "Delete \(name)? This will delete group for all members!"
-                } ?? "Delete Radio Group?",
-                isPresented: Binding(
-                    get: { confirmDeleteGroupId != nil },
-                    set: { if !$0 { confirmDeleteGroupId = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let gid = confirmDeleteGroupId { deleteGroup(gid: gid) }
-                    confirmDeleteGroupId = nil
-                }
-                Button("Cancel", role: .cancel) { confirmDeleteGroupId = nil }
             }
     }
 }

@@ -304,6 +304,7 @@ struct MapView: View {
             cursorCoordText: $cursorCoordText,
             cursorPanRequest: $cursorPanRequest,
             waypoints: $waypoints,
+            receivedWaypoints: radioGroup.receivedWaypoints,
             radioPins: radioGroup.pins,
             zoomInRequest: $zoomInReq,
             zoomOutRequest: $zoomOutReq
@@ -328,7 +329,7 @@ struct MapView: View {
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(0.55))
+        .background(scSurface.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .confirmationDialog("Share live location with Radio Group?", isPresented: $showConfirmLiveShare) {
             Button("Share Live") { startLiveSharing() }
@@ -349,6 +350,8 @@ struct MapView: View {
 
     private var topHUDShareButtons: some View {
         VStack(alignment: .leading, spacing: 10) {
+
+            // Live share toggle
             Button {
                 if radioGroup.isLiveSharing {
                     showConfirmStopLiveShare = true
@@ -364,10 +367,12 @@ struct MapView: View {
                     .font(.system(size: 18, weight: .semibold))
             }
             .buttonStyle(MapIconButtonStyle(isActive: false, foreground: liveShareStatusColor))
+            // Subtle disabled state (dim + desaturate) but keep enabled if live sharing is ON so user can stop.
             .opacity((radioGroup.canShareLocation || radioGroup.isLiveSharing) ? 1.0 : 0.35)
             .saturation((radioGroup.canShareLocation || radioGroup.isLiveSharing) ? 1.0 : 0.0)
             .disabled(!radioGroup.canShareLocation && !radioGroup.isLiveSharing)
 
+            // One-time pin
             Button {
                 guard radioGroup.canShareLocation else {
                     showBigToast(sharingDisabledMessage(), seconds: 4.0)
@@ -401,7 +406,7 @@ struct MapView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .padding(.horizontal, 10)
-                    .background(Color.black.opacity(0.80))
+                    .background(scSurfaceAlt.opacity(0.92))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -411,7 +416,7 @@ struct MapView: View {
             if let msg = toastMessage, let until = toastUntil, Date() < until {
                 Text(msg)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(scTextPrimary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity)
@@ -587,9 +592,9 @@ struct MapView: View {
                 .tint(.blue)
                 .foregroundColor(.white)
                 .colorScheme(.dark)
-                .background(Color.black.opacity(0.60))
+                .background(scSurface.opacity(0.85))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1))
             }
             .padding(.leading, 10)
 
@@ -632,7 +637,7 @@ struct MapView: View {
         guard let coord else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmed.isEmpty ? "\(waypoints.count + 1)" : trimmed
-        waypoints.append(Waypoint(name: finalName, notes: "", coordinate: coord))
+        waypoints.append(Waypoint(name: finalName, notes: "", coordinate: coord, createdAt: Date()))
     }
 
     private var locationText: String {
@@ -674,7 +679,7 @@ struct AppMenuTabsView: View {
                 .tabItem { Label("Menu", systemImage: "line.3.horizontal") }
                 .tag(MenuTab.menu)
 
-            NavigationStack { WaypointsView(waypoints: $waypoints) }
+            NavigationStack { WaypointsView(waypoints: $waypoints).environmentObject(radioGroup) }
                 .tabItem { Label("Waypoints", systemImage: "list.bullet") }
                 .tag(MenuTab.waypoints)
 
@@ -686,6 +691,7 @@ struct AppMenuTabsView: View {
             .tabItem { Label("Radio Group", systemImage: "antenna.radiowaves.left.and.right") }
             .tag(MenuTab.radioGroup)
         }
+        .background(scBackground.ignoresSafeArea())
         .tint(.white)
         .modifier(TabBarBlueBackgroundModifier())
         .overlay(TabBarControllerConfigurator().frame(width: 0, height: 0))
@@ -709,9 +715,9 @@ struct MenuHomeTab: View {
                     .padding(.vertical, 8)
                     .padding(.horizontal, 12)
                     .foregroundColor(.white)
-                    .background(bbMenuBlue_MV)
+                    .background(scSurface)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.black.opacity(0.85), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
                 .listRowBackground(Color.clear)
@@ -726,14 +732,16 @@ struct MenuHomeTab: View {
                     .padding(.vertical, 8)
                     .padding(.horizontal, 12)
                     .foregroundColor(.white)
-                    .background(bbMenuBlue_MV)
+                    .background(scSurface)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.black.opacity(0.85), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
+            .scrollContentBackground(.hidden)
+            .background(scBackground)
             .listStyle(.plain)
             .toolbarBackground(bbMenuBlue_MV, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -760,7 +768,7 @@ struct CreateWaypointPrompt: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { onCancel() }
+            scBackground.opacity(0.55).ignoresSafeArea().onTapGesture { onCancel() }
 
             HStack(alignment: .center, spacing: 10) {
                 TextField("Waypoint name", text: $name)
@@ -783,9 +791,9 @@ struct CreateWaypointPrompt: View {
                     .buttonStyle(MapPromptActionButtonStyle(kind: .secondary))
             }
             .padding(10)
-            .background(Color.black.opacity(0.75))
+            .background(scSurface.opacity(0.95))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.16), lineWidth: 1))
             .padding(.horizontal, 16)
             .buttonStyle(.plain)
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { isFocused = true } }
@@ -840,108 +848,478 @@ struct MapPromptActionButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - HUD styling
-
+// Note: `hudBoxSmall()` is used by MapView HUD readouts; WaypointsView has its own styling below.
 private extension View {
     func hudBoxSmall() -> some View {
         self
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
-            .background(Color.black.opacity(0.55))
-            .foregroundColor(.white)
+            .background(scSurface.opacity(0.70))
+            .foregroundColor(scTextPrimary)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
+
 struct WaypointsView: View {
 
     @Binding var waypoints: [Waypoint]
-    @State private var pendingDelete: Waypoint? = nil
+
+    @EnvironmentObject var radioGroup: RadioGroupStore
+    @AppStorage("radioGroupId") private var radioGroupId: String = ""
+
+    @State private var pendingDeleteOwn: Waypoint? = nil
+    @State private var pendingDeleteReceivedID: String? = nil
     @FocusState private var focusedWaypointID: UUID?
 
-    var body: some View {
-        VStack(spacing: 0) {
+    // Toast
+    @State private var toastText: String? = nil
+    @State private var toastHideWork: DispatchWorkItem? = nil
 
-            HStack(spacing: 12) {
-                Text("Name")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 90, alignment: .leading)
+    // Send animation state
+    @State private var animatingSendIDs: Set<UUID> = []
 
-                Text("Notes")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    // Local-only rename overrides for received waypoints (do NOT write back to Firestore)
+    @State private var receivedNameOverrides: [String: String] = [:]
 
-                Text("Delete")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 70, alignment: .trailing)
+    // Re-share confirmation (when user taps Share on an already-shared waypoint)
+    @State private var pendingReshare: Waypoint? = nil
+
+    // Bulk delete confirmations
+    @State private var showConfirmDeleteAllReceived: Bool = false
+    @State private var showConfirmDeleteAll: Bool = false
+
+    // Legend
+    @AppStorage("radioPinDisplayName") private var radioPinDisplayName: String = ""
+
+    private func showToast(_ text: String, seconds: TimeInterval = 3.0) {
+        toastHideWork?.cancel()
+        toastText = text
+        let work = DispatchWorkItem { toastText = nil }
+        toastHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM/dd/yy"
+        return f.string(from: date)
+    }
+
+    private var canShareWaypoints: Bool {
+        radioGroup.canShareLocation && !radioGroupId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func sendWaypointToGroup(_ wp: Waypoint) {
+        guard canShareWaypoints else {
+            showToast("Must be part of a Radio Group to send", seconds: 3.0)
+            return
+        }
+
+        if wp.sentToGroup {
+            pendingReshare = wp
+            return
+        }
+
+        func performSend(_ w: Waypoint) {
+            // Visual tap animation
+            animatingSendIDs.insert(w.id)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                animatingSendIDs.remove(w.id)
             }
-            .frame(height: 44)
-            .padding(.horizontal, 14)
-            .background(bbMenuBlue_MV)
-            .overlay(Rectangle().stroke(Color.black.opacity(0.70), lineWidth: 1))
 
-            List {
-                ForEach($waypoints) { $wp in
-                    HStack(spacing: 10) {
+            radioGroup.sendWaypointToActiveGroup(w)
 
-                        TextField("Name", text: $wp.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.black)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .frame(width: 88)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.black.opacity(0.20), lineWidth: 1)
-                            )
-                            .focused($focusedWaypointID, equals: wp.id)
-                            .tint(.black)
+            // Flip local UI flag (black plane appears next to green)
+            if let idx = waypoints.firstIndex(where: { $0.id == w.id }) {
+                waypoints[idx].sentToGroup = true
+            }
 
-                        TextField("Notes", text: $wp.notes)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.black)
-                            .textInputAutocapitalization(.sentences)
-                            .autocorrectionDisabled(true)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.black.opacity(0.20), lineWidth: 1)
-                            )
-                            .tint(.black)
+            showToast("Waypoint shared.", seconds: 2.0)
+        }
+        performSend(wp)
+    }
 
-                        Button(role: .destructive) { pendingDelete = wp } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.red)
-                                .frame(width: 34, height: 28)
-                                .background(Color.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.black.opacity(0.20), lineWidth: 1)
-                                )
-                        }
-                        .frame(width: 70, alignment: .trailing)
-                    }
-                    .padding(.vertical, 4)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                    .listRowBackground(Color.clear)
+    private func resendWaypointToGroup(_ wp: Waypoint) {
+        guard canShareWaypoints else {
+            showToast("Must be part of a Radio Group to send", seconds: 3.0)
+            return
+        }
+
+        // Visual tap animation
+        animatingSendIDs.insert(wp.id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            animatingSendIDs.remove(wp.id)
+        }
+
+        radioGroup.sendWaypointToActiveGroup(wp)
+        showToast("Waypoint shared.", seconds: 2.0)
+    }
+
+    private func shareIconView(for wp: Waypoint) -> some View {
+        let disabled = !canShareWaypoints
+        let animating = animatingSendIDs.contains(wp.id)
+
+        return HStack(spacing: 4) {
+            Image(systemName: "paperplane.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(disabled ? Color.gray : Color.green)
+
+            if wp.sentToGroup {
+                Image(systemName: "paperplane")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(width: 60, height: 28)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .scaleEffect(animating ? 0.92 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.65), value: animating)
+        .opacity(disabled ? 0.75 : 1.0)
+    }
+
+    private func pinColorForSender(_ senderUid: String) -> Color {
+        // Stable, deterministic palette by sender uid
+        let palette: [Color] = [.green, .orange, .yellow, .pink, .purple, .cyan, .mint]
+        let h = abs(senderUid.hashValue)
+        return palette[h % palette.count]
+    }
+
+    private func receivedNameBinding(for id: String, fallback: String) -> Binding<String> {
+        Binding<String>(
+            get: { receivedNameOverrides[id] ?? fallback },
+            set: { receivedNameOverrides[id] = $0 }
+        )
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 12) {
+            Text("Name")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(scTextPrimary)
+                .frame(width: 120, alignment: .leading)
+
+            Text("Date")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(scTextPrimary)
+                .frame(width: 78, alignment: .leading)
+
+            Text("Share")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(scTextPrimary)
+                .frame(width: 70, alignment: .center)
+
+            Text("Delete")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(scTextPrimary)
+                .frame(width: 70, alignment: .trailing)
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 14)
+        .background(bbMenuBlue_MV)
+        .overlay(Rectangle().stroke(Color.black.opacity(0.70), lineWidth: 1))
+    }
+
+    // Card surface and border for each row
+    private var rowSurface: Color { scSurface }
+    private var rowStroke: Color { Color.white.opacity(0.18) }
+
+    private func ownRow(_ wp: Binding<Waypoint>) -> some View {
+        let w = wp.wrappedValue
+        return HStack(spacing: 10) {
+            // Colored pin (own = red)
+            Image(systemName: "mappin")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.red)
+                .frame(width: 14, alignment: .center)
+
+            TextField("Name", text: wp.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.black)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(width: 108)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                )
+                .focused($focusedWaypointID, equals: w.id)
+                .tint(.black)
+
+            Text(formattedDate(w.createdAt))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(width: 74, alignment: .leading)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                )
+
+            Button { sendWaypointToGroup(w) } label: {
+                shareIconView(for: w)
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) { pendingDeleteOwn = w } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.red)
+                    .frame(width: 34, height: 28)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                    )
+            }
+            .frame(width: 70, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+        .listRowBackground(Color.clear)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(rowSurface.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(rowStroke, lineWidth: 1.2)
+        )
+    }
+
+    private func receivedRow(_ r: RadioGroupStore.GroupWaypoint) -> some View {
+        return HStack(spacing: 10) {
+            Image(systemName: "mappin")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(pinColorForSender(r.senderUid))
+                .frame(width: 14, alignment: .center)
+
+            TextField("Name", text: receivedNameBinding(for: r.id, fallback: r.name))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.black)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(width: 108)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                )
+                .tint(.black)
+
+            Text(formattedDate(r.createdAt))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(width: 74, alignment: .leading)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                )
+
+            // Not shareable from here
+            HStack(spacing: 4) {
+                Image(systemName: "paperplane")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.gray)
+            }
+            .frame(width: 60, height: 28)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.black.opacity(0.20), lineWidth: 1)
+            )
+
+            Button(role: .destructive) {
+                pendingDeleteReceivedID = r.id
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.red)
+                    .frame(width: 34, height: 28)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.black.opacity(0.20), lineWidth: 1)
+                    )
+            }
+            .frame(width: 70, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+        .listRowBackground(Color.clear)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(rowSurface.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(rowStroke, lineWidth: 1.2)
+        )
+    }
+
+    private var footerButtons: some View {
+        VStack(spacing: 10) {
+            Button(role: .destructive) {
+                showConfirmDeleteAllReceived = true
+            } label: {
+                Text("Delete All Waypoints Received")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.gray)
+
+            Button(role: .destructive) {
+                showConfirmDeleteAll = true
+            } label: {
+                Text("Delete All Waypoints")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.gray)
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+        .listRowBackground(Color.clear)
+    }
+
+    private var legendView: some View {
+        let meNameRaw = radioPinDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let meName = meNameRaw.isEmpty ? "Me" : meNameRaw
+
+        // Only include visible (not hidden) received waypoints.
+        let visibleReceived = radioGroup.receivedWaypoints
+            .filter { !radioGroup.hiddenReceivedWaypointIDs.contains($0.id) }
+
+        // Unique senders currently present in the received list.
+        // If senderName is missing, fall back to a stable short id.
+        let senders: [(uid: String, name: String)] = {
+            var bestNameByUid: [String: String] = [:]
+            for wp in visibleReceived {
+                let uid = wp.senderUid.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !uid.isEmpty else { continue }
+
+                let nm = wp.senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !nm.isEmpty {
+                    bestNameByUid[uid] = nm
+                } else if bestNameByUid[uid] == nil {
+                    bestNameByUid[uid] = "Member \(uid.prefix(6))"
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
+
+            return bestNameByUid
+                .map { (uid: $0.key, name: $0.value) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Location Pin Legend")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(scTextPrimary)
+
+            HStack(spacing: 8) {
+                Image(systemName: "mappin")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.red)
+                Text(meName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(scTextPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ForEach(senders, id: \.uid) { s in
+                HStack(spacing: 8) {
+                    Image(systemName: "mappin")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(pinColorForSender(s.uid))
+                    Text(s.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(scTextPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(scSurface.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1.2)
+        )
+        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
+        .listRowBackground(Color.clear)
+    }
+
+    private var listView: some View {
+        List {
+            Section {
+                ForEach($waypoints) { $wp in
+                    ownRow($wp)
+                }
+            }
+
+            Section {
+                ForEach(radioGroup.receivedWaypoints.filter { !radioGroup.hiddenReceivedWaypointIDs.contains($0.id) }) { r in
+                    receivedRow(r)
+                }
+            }
+
+            Section {
+                footerButtons
+            }
+
+            Section {
+                legendView
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .background(scBackground)
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    var body: some View {
+        ZStack {
+            scBackground.ignoresSafeArea()
+
+            // Match RadioGroupView: force the underlying hosting/container backgrounds to the theme color
+            HostingBackgroundFixer(color: UIColor(scBackground))
+                .frame(width: 0, height: 0)
+
+            VStack(spacing: 0) {
+                headerRow
+                listView
+            }
         }
         .navigationTitle("Waypoints")
         .navigationBarTitleDisplayMode(.inline)
@@ -960,16 +1338,124 @@ struct WaypointsView: View {
         .confirmationDialog(
             "Delete waypoint?",
             isPresented: Binding(
-                get: { pendingDelete != nil },
-                set: { if !$0 { pendingDelete = nil } }
+                get: { pendingDeleteOwn != nil },
+                set: { if !$0 { pendingDeleteOwn = nil } }
             )
         ) {
             Button("Confirm Delete", role: .destructive) {
-                guard let del = pendingDelete else { return }
+                guard let del = pendingDeleteOwn else { return }
                 waypoints.removeAll { $0.id == del.id }
-                pendingDelete = nil
+                pendingDeleteOwn = nil
             }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
+            Button("Cancel", role: .cancel) { pendingDeleteOwn = nil }
         }
+        .confirmationDialog(
+            "Remove received waypoint from your view?",
+            isPresented: Binding(
+                get: { pendingDeleteReceivedID != nil },
+                set: { if !$0 { pendingDeleteReceivedID = nil } }
+            )
+        ) {
+            Button("Remove", role: .destructive) {
+                guard let id = pendingDeleteReceivedID else { return }
+                radioGroup.hideReceivedWaypoint(id: id)
+                pendingDeleteReceivedID = nil
+                showToast("Removed from your view.", seconds: 2.0)
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteReceivedID = nil }
+        }
+        .confirmationDialog(
+            "Delete all received waypoints from your view?",
+            isPresented: $showConfirmDeleteAllReceived,
+            titleVisibility: .visible
+        ) {
+            Button("Confirm Delete", role: .destructive) {
+                radioGroup.hideAllReceivedWaypoints()
+                showToast("Deleted all received waypoints (local).", seconds: 2.0)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete ALL waypoints?",
+            isPresented: $showConfirmDeleteAll,
+            titleVisibility: .visible
+        ) {
+            Button("Confirm Delete", role: .destructive) {
+                waypoints.removeAll()
+                radioGroup.hideAllReceivedWaypoints()
+                showToast("Deleted all waypoints (local).", seconds: 2.0)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .overlay(
+            Group {
+                if let text = toastText {
+                    VStack {
+                        Spacer()
+                        Text(text)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.85))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.bottom, 30)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+            }
+        )
+        .overlay(
+            Group {
+                if let wp = pendingReshare {
+                    ZStack {
+                        Color.black.opacity(0.45)
+                            .ignoresSafeArea()
+                            .onTapGesture { pendingReshare = nil }
+
+                        VStack(spacing: 12) {
+                            Text("Waypoint already shared, share again?")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+
+                            HStack(spacing: 14) {
+                                Button {
+                                    pendingReshare = nil
+                                } label: {
+                                    Text("Cancel")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(.red)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    // Send again
+                                    pendingReshare = nil
+                                    resendWaypointToGroup(wp)
+                                } label: {
+                                    Text("Send Again")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(.green)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: 320)
+                        .background(Color.black.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                        .padding(.horizontal, 24)
+                    }
+                    .transition(.opacity)
+                }
+            }
+        )
     }
 }

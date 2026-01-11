@@ -42,47 +42,66 @@ struct OfflineMapsView: View {
     // MARK: - UI
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
+        ZStack {
+            // Dark-neutral background (easier on eyes than pure black)
+            Color(red: 0.06, green: 0.07, blue: 0.09)
+                .ignoresSafeArea()
 
-                if !offline.status.isEmpty {
-                    Text(offline.status)
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
-                }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
 
-                ForEach(DistrictID.allCases, id: \.self) { district in
-                    SectionHeader(title: district.displayName)
-
-                    if let packs = packsByDistrict[district] {
-                        ForEach(packs) { pack in
-                            PackCard(
-                                pack: pack,
-                                previewURL: previewURL(for: pack),
-                                onAppear: {
-                                    offline.fetchRemoteSizeIfNeeded(pack: pack, url: mbtilesURL(for: pack))
-                                },
-                                onDownload: {
-                                    let url = mbtilesURL(for: pack)
-                                    print("⬇️ Download URL [\(pack.slug)]: \(url.absoluteString)")
-                                    offline.download(pack: pack, from: url)
-                                },
-                                onDelete: { offline.delete(pack) },
-                                onCancel: { offline.cancel(pack) }
-                            )
-                            .environmentObject(offline)
+                    if !offline.status.isEmpty {
+                        Text(offline.status)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
                             .padding(.horizontal, 16)
+                    }
+
+                    ForEach(DistrictID.allCases, id: \.self) { district in
+                        SectionHeader(title: district.displayName)
+
+                        if let packs = packsByDistrict[district] {
+                            ForEach(packs) { pack in
+                                PackCard(
+                                    pack: pack,
+                                    previewURL: previewURL(for: pack),
+                                    onAppear: {
+                                        offline.fetchRemoteSizeIfNeeded(pack: pack, url: mbtilesURL(for: pack))
+                                    },
+                                    onDownload: {
+                                        let url = mbtilesURL(for: pack)
+                                        print("⬇️ Download URL [\(pack.slug)]: \(url.absoluteString)")
+                                        offline.download(pack: pack, from: url)
+                                    },
+                                    onDelete: { offline.delete(pack) },
+                                    onCancel: { offline.cancel(pack) }
+                                )
+                                .environmentObject(offline)
+                                .padding(.horizontal, 16)
+                            }
                         }
                     }
-                }
 
-                Spacer(minLength: 20)
+                    Spacer(minLength: 20)
+                }
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         }
+        .environment(\.colorScheme, .dark)
+        .foregroundColor(.white)
         .navigationTitle("Offline Maps")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(bbMenuBlue, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Offline Maps")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .underline()
+            }
+        }
     }
 }
 
@@ -93,6 +112,7 @@ private struct SectionHeader: View {
     var body: some View {
         Text(title)
             .font(.title3.weight(.semibold))
+            .foregroundColor(.white)
             .padding(.horizontal, 16)
             .padding(.top, 8)
     }
@@ -152,7 +172,7 @@ private struct PackCard: View {
                             Text("No preview\n\(slug).jpg")
                                 .font(.footnote.weight(.semibold))
                                 .multilineTextAlignment(.center)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.white.opacity(0.75))
                                 .padding()
                         }
                     }
@@ -168,6 +188,7 @@ private struct PackCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(slug)
                         .font(.headline)
+                        .foregroundColor(.white)
                     Text("Size: \(sizeToShow.map(formatBytes) ?? "—")")
                         .font(.footnote)
                         .foregroundColor(.secondary)
@@ -228,7 +249,11 @@ private struct PackCard: View {
             }
         }
         .padding(14)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(Color.black.opacity(0.35))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .onAppear(perform: onAppear)
     }

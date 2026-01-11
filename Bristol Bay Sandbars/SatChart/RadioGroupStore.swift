@@ -16,6 +16,127 @@ final class RadioGroupStore: ObservableObject {
     @Published var pins: [Pin] = []
     /// True only when the active group has at least 2 members (including this user).
     @Published var canShareLocation: Bool = false
+    // Waypoints shared to the active group (received from other members).
+    @Published var receivedWaypoints: [GroupWaypoint] = []
+    /// Locally-hidden received waypoint ids (per active group). Used for "Delete received" without deleting for the whole group.
+    @Published private(set) var hiddenReceivedWaypointIDs: Set<String> = []
+
+    // MARK: - Local cache (Application Support)
+
+    private struct CachedGroupWaypoint: Codable, Identifiable, Hashable {
+        let id: String
+        var name: String
+        var notes: String
+        var lat: Double
+        var lon: Double
+        var createdAt: Date
+        var sentAt: Date
+        var senderUid: String
+        var senderName: String
+    }
+
+    private func appSupportDir() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("SatChart", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+        }
+        return dir
+    }
+
+    private func receivedWaypointsFileURL(groupId: String) -> URL {
+        appSupportDir().appendingPathComponent("received_waypoints_\(groupId).json")
+    }
+
+    private func saveCachedReceivedWaypoints(_ items: [GroupWaypoint], groupId: String) {
+        let cached: [CachedGroupWaypoint] = items.map {
+            CachedGroupWaypoint(
+                id: $0.id,
+                name: $0.name,
+                notes: $0.notes,
+                lat: $0.coordinate.latitude,
+                lon: $0.coordinate.longitude,
+                createdAt: $0.createdAt,
+                sentAt: $0.sentAt,
+                senderUid: $0.senderUid,
+                senderName: $0.senderName
+            )
+        }
+
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+
+        let url = receivedWaypointsFileURL(groupId: groupId)
+        if let data = try? enc.encode(cached) {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
+    private func hiddenReceivedWaypointsFileURL(groupId: String) -> URL {
+        appSupportDir().appendingPathComponent("hidden_received_waypoints_\(groupId).json")
+    }
+
+    private func saveHiddenReceivedWaypointIDs(_ ids: Set<String>, groupId: String) {
+        let url = hiddenReceivedWaypointsFileURL(groupId: groupId)
+        let enc = JSONEncoder()
+        if let data = try? enc.encode(Array(ids)) {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
+
+    private func loadHiddenReceivedWaypointIDs(groupId: String) -> Set<String> {
+        let url = hiddenReceivedWaypointsFileURL(groupId: groupId)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let dec = JSONDecoder()
+        if let arr = try? dec.decode([String].self, from: data) {
+            return Set(arr)
+        }
+        return []
+    }
+    private func loadCachedReceivedWaypoints(groupId: String) -> [GroupWaypoint] {
+        let url = receivedWaypointsFileURL(groupId: groupId)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+
+        guard let cached = try? dec.decode([CachedGroupWaypoint].self, from: data) else {
+            return []
+        }
+
+        return cached.map {
+            GroupWaypoint(
+                id: $0.id,
+                name: $0.name,
+                notes: $0.notes,
+                coordinate: CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon),
+                createdAt: $0.createdAt,
+                sentAt: $0.sentAt,
+                senderUid: $0.senderUid,
+                senderName: $0.senderName
+            )
+        }
+    }
+
+    struct GroupWaypoint: Identifiable, Hashable {
+        let id: String                 // Firestore doc id
+        var name: String
+        var notes: String
+        var coordinate: CLLocationCoordinate2D
+        var createdAt: Date
+        var sentAt: Date
+        var senderUid: String
+        var senderName: String
+
+        // We treat Firestore doc id as the identity. This avoids Hashable/Equatable issues
+        // with CLLocationCoordinate2D (which is not Hashable/Equatable).
+        static func == (lhs: GroupWaypoint, rhs: GroupWaypoint) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
+    }
 
     // MARK: - Types
 
@@ -36,9 +157,9 @@ final class RadioGroupStore: ObservableObject {
     private let db = Firestore.firestore()
     private var pinsListener: ListenerRegistration?
     private var membersListener: ListenerRegistration?
+    private var waypointsListener: ListenerRegistration?
     private var authHandle: AuthStateDidChangeListenerHandle?
     private var defaultsObserver: NSObjectProtocol?
-
     private let groupIdDefaultsKey = "radioGroupId"
 
     private var currentGroupId: String? {
@@ -55,11 +176,13 @@ final class RadioGroupStore: ObservableObject {
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, _ in
             self?.startPinsListener()
             self?.startMembersListener()
+            self?.startWaypointsListener()
         }
 
         ensureSignedIn()
         startPinsListener()
         startMembersListener()
+        startWaypointsListener()
 
         // Restart listeners when group selection changes.
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -69,6 +192,7 @@ final class RadioGroupStore: ObservableObject {
         ) { [weak self] _ in
             self?.startPinsListener()
             self?.startMembersListener()
+            self?.startWaypointsListener()
         }
     }
 
@@ -78,6 +202,10 @@ final class RadioGroupStore: ObservableObject {
 
         membersListener?.remove()
         membersListener = nil
+        
+        waypointsListener?.remove()
+        waypointsListener = nil
+
         if let authHandle {
             Auth.auth().removeStateDidChangeListener(authHandle)
         }
@@ -95,6 +223,7 @@ final class RadioGroupStore: ObservableObject {
         UserDefaults.standard.set(groupId, forKey: groupIdDefaultsKey)
         startPinsListener()
         startMembersListener()
+        startWaypointsListener()
     }
 
     func markLiveShared() {
@@ -102,6 +231,30 @@ final class RadioGroupStore: ObservableObject {
         lastLiveLocationSentAt = Date()
     }
 
+    /// Hide a received waypoint locally (does not delete from Firestore; only hides on this device).
+    func hideReceivedWaypoint(id: String) {
+        guard let gid = currentGroupId else { return }
+        hiddenReceivedWaypointIDs.insert(id)
+        saveHiddenReceivedWaypointIDs(hiddenReceivedWaypointIDs, groupId: gid)
+        receivedWaypoints.removeAll { $0.id == id }
+        // Also update the cache so hidden waypoints don't reappear from cache
+        if let gid = currentGroupId {
+            saveCachedReceivedWaypoints(receivedWaypoints, groupId: gid)
+        }
+    }
+
+    /// Hide ALL received waypoints locally for the active group.
+    func hideAllReceivedWaypoints() {
+        guard let gid = currentGroupId else { return }
+        for wp in receivedWaypoints { hiddenReceivedWaypointIDs.insert(wp.id) }
+        saveHiddenReceivedWaypointIDs(hiddenReceivedWaypointIDs, groupId: gid)
+        receivedWaypoints.removeAll()
+        // Also update the cache so hidden waypoints don't reappear from cache
+        if let gid = currentGroupId {
+            saveCachedReceivedWaypoints([], groupId: gid)
+        }
+    }
+    
     func stopLiveSharing() {
         isLiveSharing = false
     }
@@ -180,6 +333,36 @@ final class RadioGroupStore: ObservableObject {
             }
     }
 
+    /// Shares a waypoint with the active Radio Group (writes to groups/{groupId}/waypoints/{waypointId}).
+    /// Default behavior remains private: local waypoints stay local unless explicitly sent.
+    func sendWaypointToActiveGroup(_ wp: Waypoint) {
+        guard let uid else {
+            ensureSignedIn()
+            return
+        }
+        guard let gid = currentGroupId else { return }
+
+        let ref = db.collection("groups").document(gid)
+            .collection("waypoints")
+            .document(wp.id.uuidString)
+
+        let now = Date()
+        let senderNameRaw = (UserDefaults.standard.string(forKey: "radioPinDisplayName") ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let senderName = senderNameRaw.isEmpty ? "Member" : senderNameRaw
+
+        ref.setData([
+            "name": wp.name,
+            "notes": wp.notes,
+            "lat": wp.coordinate.latitude,
+            "lon": wp.coordinate.longitude,
+            "createdAt": Timestamp(date: wp.createdAt),
+            "sentAt": Timestamp(date: now),
+            "senderUid": uid,
+            "senderName": senderName
+        ], merge: true)
+    }
+
     var lastSentText: String {
         guard let d = lastLiveLocationSentAt else { return "—" }
         let f = DateFormatter()
@@ -195,6 +378,103 @@ final class RadioGroupStore: ObservableObject {
         return db.collection("groups").document(gid).collection("pins")
     }
 
+    private func waypointsCollection() -> CollectionReference? {
+        guard let gid = currentGroupId else { return nil }
+        return db.collection("groups").document(gid).collection("waypoints")
+    }
+
+    private func startWaypointsListener() {
+        guard let myUid = uid else { return }
+
+        // If no group selected, stop listening but keep last-known received waypoints.
+        // (Prevents UI/map from “blinking” when radioGroupId is briefly empty during transitions.)
+        guard let col = waypointsCollection(), let gid = currentGroupId else {
+            waypointsListener?.remove()
+            waypointsListener = nil
+            return
+        }
+
+        // Load hidden IDs first (so both cache + live snapshots can filter).
+        let hidden = loadHiddenReceivedWaypointIDs(groupId: gid)
+        DispatchQueue.main.async { self.hiddenReceivedWaypointIDs = hidden }
+
+        // Load cached received waypoints immediately so map doesn't blink.
+        let cachedAll = loadCachedReceivedWaypoints(groupId: gid)
+        let cached = cachedAll.filter { !hidden.contains($0.id) }
+        if !cached.isEmpty {
+            DispatchQueue.main.async { self.receivedWaypoints = cached }
+        }
+
+        waypointsListener?.remove()
+        waypointsListener = col.addSnapshotListener { [weak self] snapshot, _ in
+            guard let self else { return }
+            let docs = snapshot?.documents ?? []
+
+            var out: [GroupWaypoint] = []
+            out.reserveCapacity(docs.count)
+
+            for d in docs {
+                let data = d.data()
+
+                // Sender (support legacy field names from earlier builds)
+                let senderUidRaw = (data["senderUid"] as? String)
+                    ?? (data["createdByUid"] as? String)
+                    ?? (data["requestedByUid"] as? String)
+                    ?? (data["createdBy"] as? String)
+                    ?? ""
+
+                // If still missing, fall back to a stable synthetic uid so UI/legend can still render
+                let senderUidTrim = senderUidRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                let senderUid = senderUidTrim.isEmpty ? "unknown-\(d.documentID)" : senderUidTrim
+
+                // Received = other members only
+                if senderUid == myUid { continue }
+
+                // Respect local hide list (do not delete from Firestore)
+                if hidden.contains(d.documentID) { continue }
+
+                let senderNameRaw = (data["senderName"] as? String)
+                    ?? (data["createdByName"] as? String)
+                    ?? (data["requestedByName"] as? String)
+                    ?? ""
+
+                let senderNameTrim = senderNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                let senderName = senderNameTrim.isEmpty ? "Member \(senderUid.prefix(6))" : senderNameTrim
+
+                // Waypoint fields
+                let name = (data["name"] as? String) ?? "Waypoint"
+                let notes = (data["notes"] as? String) ?? ""
+                let lat = (data["lat"] as? Double) ?? 0
+                let lon = (data["lon"] as? Double) ?? 0
+
+                let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+                let sentAt = (data["sentAt"] as? Timestamp)?.dateValue() ?? createdAt
+
+                out.append(
+                    GroupWaypoint(
+                        id: d.documentID,
+                        name: name,
+                        notes: notes,
+                        coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                        createdAt: createdAt,
+                        sentAt: sentAt,
+                        senderUid: senderUid,
+                        senderName: senderName
+                    )
+                )
+            }
+
+            out.sort { $0.sentAt > $1.sentAt }
+
+            // Persist to Application Support so the map can restore even if listener restarts.
+            self.saveCachedReceivedWaypoints(out, groupId: gid)
+
+            DispatchQueue.main.async {
+                self.receivedWaypoints = out
+            }
+        }
+    }
+        
     private func ensureSignedIn() {
         if Auth.auth().currentUser != nil { return }
         Auth.auth().signInAnonymously { _, _ in }
