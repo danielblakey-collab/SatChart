@@ -1,7 +1,17 @@
 
+
 # macOS
 .DS_Store
 
 # Xcode user data (local-only)
 *.xcuserstate
 *.xcuserdata/
+
+node_modules/
+service-account.json
+.env
+.DS_Store
+dist/
+build/
+secrets/
+
