@@ -270,10 +270,12 @@ export async function load2013(): Promise<YearBatch> {
 
   // ---- KVICHAK ----
   
-  { year, date: "2013-06-21", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 894, cumulativeEscapement: 894 },
-  { year, date: "2013-06-22", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 60, cumulativeEscapement: 954 },
-  { year, date: "2013-06-23", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 11628, cumulativeEscapement: 12582 },
-  { year, date: "2013-06-24", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 55410, cumulativeEscapement: 67992 },
+  
+  { year, date: "2013-06-20", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 44892, cumulativeEscapement: 44892 },
+  { year, date: "2013-06-21", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 92394, cumulativeEscapement: 137286 },
+  { year, date: "2013-06-22", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 60,    cumulativeEscapement: 137346 },
+  { year, date: "2013-06-23", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 11628, cumulativeEscapement: 148974 },
+  { year, date: "2013-06-24", riverKey: "kvichak", metho{ yead: "tower", isOperational: true, dailyEscapement: 55410, cumulativeEscapement: 67992 },
   { year, date: "2013-06-25", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 54684, cumulativeEscapement: 122676 },
   { year, date: "2013-06-26", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 24042, cumulativeEscapement: 146718 },
   { year, date: "2013-06-27", riverKey: "kvichak", method: "tower", isOperational: true, dailyEscapement: 44574, cumulativeEscapement: 191292 },

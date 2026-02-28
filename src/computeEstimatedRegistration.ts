@@ -24,6 +24,7 @@
  *   --est-start=YYYY-MM-DD --est-end=YYYY-MM-DD
  *   --clamp=0.20      (max daily decrease clamp; 0 disables)
  *   --clamp-up=0.60   (max daily increase clamp; 0 disables)
+ *   --smooth=0.35     (EMA alpha; 0 disables; typical 0.25–0.45)
  *   --cap-mult=1.15   (cap vs max observed)
  */
 
@@ -64,11 +65,24 @@ function parseArgs(argv: string[]) {
   const estimateStart = argv.find(a => a.startsWith("--est-start="))?.split("=")[1] ?? `${year}-07-17`;
   const estimateEnd = argv.find(a => a.startsWith("--est-end="))?.split("=")[1] ?? `${year}-08-03`;
 
-  const clampPct = Number(argv.find(a => a.startsWith("--clamp="))?.split("=")[1] ?? "0.20");
+  const clampDown = Number(argv.find(a => a.startsWith("--clamp="))?.split("=")[1] ?? "0.20");
   const clampUp = Number(argv.find(a => a.startsWith("--clamp-up="))?.split("=")[1] ?? "0.60");
+  const smooth = Number(argv.find(a => a.startsWith("--smooth="))?.split("=")[1] ?? "0.35");
   const capMult = Number(argv.find(a => a.startsWith("--cap-mult="))?.split("=")[1] ?? "1.15");
 
-  return { year, write, dryRun, calibrationStart, calibrationEnd, estimateStart, estimateEnd, clampPct, clampUp, capMult };
+  return {
+    year,
+    write,
+    dryRun,
+    calibrationStart,
+    calibrationEnd,
+    estimateStart,
+    estimateEnd,
+    clampDown,
+    clampUp,
+    smooth,
+    capMult,
+  };
 }
 
 function safeNum(v: any): number | null {
@@ -98,14 +112,26 @@ async function fetchOpsRows(
 }
 
 async function main() {
-  const { year, write, dryRun, calibrationStart, calibrationEnd, estimateStart, estimateEnd, clampPct, clampUp, capMult } =
-    parseArgs(process.argv);
+  const {
+    year,
+    write,
+    dryRun,
+    calibrationStart,
+    calibrationEnd,
+    estimateStart,
+    estimateEnd,
+    clampDown,
+    clampUp,
+    smooth,
+    capMult,
+  } = parseArgs(process.argv);
 
   const db = initFirestore();
 
   const districts: DistrictKey[] = ["naknek-kvichak", "egegik", "ugashik", "nushagak", "togiak"];
 
-  // 1) Calibration window: use observed boats + drift deliveries (hours gate softened for hours-not-reported cases)
+  // 1) Calibration window: use observed boats + drift deliveries.
+  // Calibration gate: hours are not reliable across tables/years. Only require boats + deliveries.
   const calibRows = await fetchOpsRows(db, year, calibrationStart, calibrationEnd);
 
   const calib: Record<
@@ -130,16 +156,11 @@ async function main() {
       if (boatsHere != null && boatsHere > 0) lastBoats = boatsHere;
 
       const del = safeNum(r.deliveries?.drift);
-      const openMaybe = safeNum(r.driftOpenHours);
 
-      // Treat “hours missing / not reported” as OK for calibration.
-      // Also: if hours are 0 but deliveries exist, treat as hours-not-reported and allow.
-      const hoursOk = openMaybe == null ? true : (openMaybe > 0 || (del != null && del > 0));
-
-      // Use observed boats if present; otherwise carry-forward the last observed boats
+      // Carry-forward boats when the table only reports registration some days.
       const boatsUsed = boatsHere != null ? boatsHere : lastBoats;
 
-      if (boatsUsed != null && boatsUsed > 0 && del != null && del >= 0 && hoursOk) {
+      if (boatsUsed != null && boatsUsed > 0 && del != null && del >= 0) {
         sumDeliveries += del;
         sumBoatDays += boatsUsed; // boat-days proxy
         samples++;
@@ -152,9 +173,8 @@ async function main() {
     calib[dk] = { deliveriesPerBoat, maxObservedBoats: maxBoats, samples, sumDeliveries, sumBoatDays };
   }
 
-  // 2) Estimation window: post-registration
+  // 2) Estimation window
   const estRows = await fetchOpsRows(db, year, estimateStart, estimateEnd);
-
   const updates: Array<{ docId: string; patch: Record<string, any> }> = [];
 
   for (const dk of districts) {
@@ -166,7 +186,7 @@ async function main() {
     const c = calib[dk];
     const ratio = c.deliveriesPerBoat;
 
-    let lastEst: number | null = null;
+    let lastSmooth: number | null = null; // EMA state per district
 
     for (const r of rows) {
       const date = r.date;
@@ -174,39 +194,52 @@ async function main() {
 
       const driftDeliveries = safeNum(r.deliveries?.drift);
 
-      let est: number | null = null;
+      let estRaw: number | null = null;
+      let estFinal: number | null = null;
+
       let source: RegSource = "unknown";
       let reason = "";
 
       if (ratio != null && driftDeliveries != null) {
-        // Post-7/16: boats often deliver ~1.0–1.5x/day; keep ratio in that realistic band.
+        // Post-7/16: boats often deliver ~1.0–1.5x/day
         const ratioEff = clamp(ratio, 1.0, 1.5);
 
-        est = driftDeliveries / ratioEff;
+        estRaw = driftDeliveries / ratioEff;
         source = "estimated_from_deliveries";
         reason = "deliveries_over_calibrated_deliveriesPerBoat|ratio_bounded_1_to_1p5";
 
-        // cap (prevents absurd spikes)
+        // Cap vs max observed
         const cap = c.maxObservedBoats > 0 ? c.maxObservedBoats * capMult : Number.POSITIVE_INFINITY;
-        est = clamp(est, 0, cap);
+        estRaw = clamp(estRaw, 0, cap);
 
-        // Asymmetric clamp: allow swelling (up) more than contraction (down)
-        if (lastEst != null && (clampPct > 0 || clampUp > 0)) {
-          const lo = lastEst * (1 - Math.max(0, clampPct));
-          const hi = lastEst * (1 + Math.max(0, clampUp));
-          est = clamp(est, lo, hi);
-          reason += "|clamped_asymmetric";
+        // Asymmetric clamp using lastSmooth as the reference (your request)
+        const ref = lastSmooth;
+        if (ref != null && (clampDown > 0 || clampUp > 0)) {
+          const lo = ref * (1 - Math.max(0, clampDown));
+          const hi = ref * (1 + Math.max(0, clampUp));
+          estRaw = clamp(estRaw, lo, hi);
+          reason += "|clamped_asymmetric_ref_lastSmooth";
         }
 
-        lastEst = est;
-      } else if (lastEst != null) {
-        est = lastEst;
+        // EMA smoothing (single source of truth)
+        if (smooth > 0 && smooth < 1) {
+          if (lastSmooth == null) lastSmooth = estRaw;
+          else lastSmooth = (smooth * estRaw) + ((1 - smooth) * lastSmooth);
+          estFinal = lastSmooth;
+          reason += "|ema";
+        } else {
+          estFinal = estRaw;
+          lastSmooth = estRaw;
+        }
+      } else if (lastSmooth != null) {
+        // Carry-forward when no deliveries/ratio
         source = "carried_forward";
         reason = "no_deliveries_or_no_ratio";
+        estFinal = lastSmooth;
       } else {
-        est = null;
         source = "unknown";
         reason = "no_ratio_and_no_prev";
+        estFinal = null;
       }
 
       updates.push({
@@ -216,7 +249,7 @@ async function main() {
           date,
           districtKey: dk,
 
-          estimatedDriftBoats: est != null ? Math.round(est) : null,
+          estimatedDriftBoats: estFinal != null ? Math.round(estFinal) : null,
           registrationSource: source,
 
           estimationDetails: {
@@ -224,8 +257,12 @@ async function main() {
             reason,
 
             driftDeliveries: driftDeliveries ?? null,
+
             deliveriesPerBoat: ratio,
             deliveriesPerBoatEffective: (ratio != null ? clamp(ratio, 1.0, 1.5) : null),
+
+            estimatedRaw: estRaw,
+            estimatedSmoothed: estFinal,
 
             calibrationWindow: `${calibrationStart}..${calibrationEnd}`,
             estimateWindow: `${estimateStart}..${estimateEnd}`,
@@ -233,9 +270,11 @@ async function main() {
             sumDeliveries: c.sumDeliveries,
             sumBoatDays: c.sumBoatDays,
             maxObservedBoats: c.maxObservedBoats,
+
             capMult,
-            clampPct,
+            clampDown,
             clampUp,
+            smooth,
           },
 
           updatedAt: new Date().toISOString(),

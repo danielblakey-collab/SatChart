@@ -15,3 +15,9 @@ dist/
 build/
 secrets/
 
+
+# --- local artifacts ---
+.firebase/
+.venv/
+.DS_Store
+*.vsix

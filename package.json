@@ -11,8 +11,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@thednp/dommatrix": "^3.0.2",
+    "canvas": "^3.2.1",
+    "execa": "^9.6.1",
     "firebase-admin": "^13.6.0",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^5.4.530",
     "zod": "^4.3.5"
   },
   "devDependencies": {
