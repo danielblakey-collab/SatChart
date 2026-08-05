@@ -287,7 +287,8 @@ struct SmartLogbookView: View {
     private func logbookSubpageScaffold<Content: View>(
         title: String,
         subtitle: String,
-        @ViewBuilder content: () -> Content
+        scrollTargetID: UUID? = nil,
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         ZStack {
             smartLogbookBackgroundTop.ignoresSafeArea()
@@ -301,26 +302,36 @@ struct SmartLogbookView: View {
             )
             .ignoresSafeArea()
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(title)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .underline(true, color: .white.opacity(0.55))
-                            .frame(maxWidth: .infinity, alignment: .center)
+            ScrollViewReader { scrollProxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(title)
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .underline(true, color: .white.opacity(0.55))
+                                .frame(maxWidth: .infinity, alignment: .center)
 
-                        Text(subtitle)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.78))
-                            .fixedSize(horizontal: false, vertical: true)
+                            Text(subtitle)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.78))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        content()
                     }
-
-                    content()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 28)
+                .onAppear {
+                    guard let scrollTargetID else { return }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            scrollProxy.scrollTo(scrollTargetID, anchor: .top)
+                        }
+                    }
+                }
             }
         }
         .navigationTitle(title)
@@ -359,12 +370,13 @@ struct SmartLogbookView: View {
             .smartLogbookInsetStyle()
     }
 
-    private func setsSubpage() -> some View {
+    private func setsSubpage(focusedSetID: UUID? = nil) -> some View {
         logbookSubpageScaffold(
             title: "Sets",
-            subtitle: "Every recorded set lives here. Use Show Set to control map visibility."
+            subtitle: "Every recorded set lives here. Use Show Set to control map visibility.",
+            scrollTargetID: focusedSetID
         ) {
-            setsSectionCard
+            setsSectionCard(focusedSetID: focusedSetID)
         }
     }
 
@@ -391,7 +403,7 @@ struct SmartLogbookView: View {
         }
     }
 
-    private var setsSectionCard: some View {
+    private func setsSectionCard(focusedSetID: UUID? = nil) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recorded Sets")
                 .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -415,12 +427,14 @@ struct SmartLogbookView: View {
                         SmartFishingSetListRow(
                             set: setBinding,
                             deliveryOptions: setDeliveryOptions,
+                            isNavigationTarget: entry.recordID == focusedSetID,
                             onDelete: {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     store.deleteFishingSet(setID: entry.recordID)
                                 }
                             }
                         )
+                        .id(entry.recordID)
                     }
                 }
             }
@@ -466,6 +480,7 @@ struct SmartLogbookView: View {
                             entryIndex: index,
                             seasonBaseDistrict: activeSeason.district,
                             priorCatchLbs: store.catchToDate(beforeOpeningID: opening.id),
+                            linkedSets: store.assignedFishingSets(forOpeningID: opening.id),
                             editDestination: AnyView(
                                 deliveryDetailPage(
                                     opening: opening,
@@ -474,6 +489,12 @@ struct SmartLogbookView: View {
                                     activeSeason: activeSeason
                                 )
                             ),
+                            linkedSetDestination: { setID in
+                                AnyView(
+                                    setsSubpage(focusedSetID: setID)
+                                        .menuChildPageChrome()
+                                )
+                            },
                             onDelete: {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     store.deleteOpening(opening.id)
@@ -2083,6 +2104,8 @@ private struct SmartLogbookOpeningCard: View {
                         }
                     )
                 }
+
+                fishingSetsCard
             }
 
             if showShortcutControls {
@@ -2579,8 +2602,6 @@ private struct SmartLogbookOpeningCard: View {
 
             driftOpeningEditorCard
 
-            fishingSetsCard
-
             fishTicketOCRCard
 
             VStack(alignment: .leading, spacing: 10) {
@@ -2768,6 +2789,8 @@ private struct SmartLogbookOpeningCard: View {
                 }
                 .smartLogbookSmallSecondaryButtonStyle()
             }
+
+            fishingSetsCard
         }
         .smartLogbookDeliveryCardStyle()
     }
@@ -3530,6 +3553,7 @@ private struct SmartFishingSetDeliveryOption: Identifiable, Equatable {
 private struct SmartFishingSetListRow: View {
     @Binding var set: SmartFishingSetRecord
     let deliveryOptions: [SmartFishingSetDeliveryOption]
+    let isNavigationTarget: Bool
     let onDelete: () -> Void
 
     @State private var isEditingOptionalEntry = false
@@ -3692,7 +3716,10 @@ private struct SmartFishingSetListRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(
+                    isNavigationTarget ? smartLogbookToggleBlue : Color.white.opacity(0.08),
+                    lineWidth: isNavigationTarget ? 2 : 1
+                )
         )
         .onAppear {
             syncAssignmentState()
@@ -3854,7 +3881,9 @@ private struct SmartDeliverySummaryRow: View {
     let entryIndex: Int
     let seasonBaseDistrict: District
     let priorCatchLbs: Int
+    let linkedSets: [SmartFishingSetRecord]
     let editDestination: AnyView
+    let linkedSetDestination: (UUID) -> AnyView
     let onDelete: () -> Void
 
     @State private var isShowingFlagNotes = false
@@ -4008,6 +4037,29 @@ private struct SmartDeliverySummaryRow: View {
                     Label("Edit", systemImage: "pencil")
                 }
                 .smartLogbookSmallPillButtonStyle(fillColor: smartLogbookAccent)
+            }
+
+            if !linkedSets.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Associated Sets")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.70))
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(linkedSets) { fishingSet in
+                                NavigationLink {
+                                    linkedSetDestination(fishingSet.id)
+                                } label: {
+                                    Label("Set \(fishingSet.setNumber)", systemImage: "timer")
+                                }
+                                .smartLogbookSmallPillButtonStyle(fillColor: smartLogbookAccent)
+                                .accessibilityLabel("Open Set \(fishingSet.setNumber) on the Sets page")
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
             }
         }
         .padding(12)
