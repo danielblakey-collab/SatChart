@@ -6,6 +6,9 @@
 # Xcode user data (local-only)
 *.xcuserstate
 *.xcuserdata/
+xcuserdata/
+*.xcuserdatad/
+*.xcresult/
 
 node_modules/
 service-account.json
@@ -19,5 +22,7 @@ secrets/
 # --- local artifacts ---
 .firebase/
 .venv/
+__pycache__/
+*.py[cod]
 .DS_Store
 *.vsix

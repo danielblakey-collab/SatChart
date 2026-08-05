@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "offline_all_2015_2025",
+      "type": "all",
+      "version": 7,
+      "format": "sqlite+gzip",
+      "url": "/packs/offline.sqlite.gz",
+      "sha256": "55fe0fa5016632f3f8138117a76390b4dd93be0e85ee781a9c4e294dd367e24c",
+      "size": 714670,
+      "sqliteUrl": "/packs/offline.sqlite",
+      "sqliteSha256": "4656a99349c82fae361a192d3360f17c4901ae558659cf1c81ff21f70e318686",
+      "sqliteSize": 2596864
+    }
+  ]
+}
