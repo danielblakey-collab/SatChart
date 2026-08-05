@@ -1162,7 +1162,7 @@ struct MapView: View {
                             responsiveTopHUDCard(availableWidth: hudWidth, landscape: true)
                         }
 
-                        if hasVisibleTopActionRow {
+                        if !hasVisibleTopHUDContent && hasVisibleTopActionRow {
                             responsiveTopHUDShareButtons(landscape: true)
                         }
 
@@ -1530,63 +1530,82 @@ struct MapView: View {
         let tideWidth = landscapeExpandedTideWidth
         let contentWidth = max(0, availableWidth - 8)
         let showsTideColumn = showNavTideHUD || showOfflineModeInTopHUDLocation
-        let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
-        let tideSpacing: CGFloat = showsTideColumn ? 8 : 0
+        let showsActionColumn = hasVisibleTopHUDActionControls
+        let visibleTrailingColumnCount = (showsTideColumn ? 1 : 0) + (showsActionColumn ? 1 : 0)
+        let trailingColumnSpacing = CGFloat(visibleTrailingColumnCount) * mapControlDefaultSpacing
+        let actionColumnWidth = showsActionColumn ? mapControlButtonSize : 0
         let leftWidth = max(
             0,
             contentWidth
                 - (showsTideColumn ? tideWidth : 0)
-                - tideSpacing
+                - actionColumnWidth
+                - trailingColumnSpacing
         )
+        let primaryButtonCount = 3 + (showNavKDLGButton ? 1 : 0)
+        let primaryButtonWidth = buttonGroupWidth(
+            count: primaryButtonCount,
+            spacing: mapControlDefaultSpacing
+        )
+        let windWidth = showNavWindReadout ? landscapeWindReadoutWidth : 0
+        let centerReadoutLeading = primaryButtonWidth + max(
+            0,
+            (leftWidth - primaryButtonWidth - windWidth) / 2
+        )
+        let shareButtonWidth = hasVisibleTopHUDShareControls
+            ? buttonGroupWidth(count: 2, spacing: mapControlDefaultSpacing)
+            : 0
+        let locationLeading = shareButtonWidth
+            + (hasVisibleTopHUDShareControls && showNavLocationReadout ? 6 : 0)
         let locationWidth = min(
             topHUDLocationFixedWidth,
-            max(220, leftWidth - controlWidth - 8)
+            max(0, centerReadoutLeading - locationLeading - 4)
         )
+        let centerReadoutWidth = max(0, leftWidth - centerReadoutLeading)
 
-        return HStack(alignment: .top, spacing: tideSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .top, spacing: 8) {
-                    topHUDExpandedControlButtons
-                        .zIndex(2)
+        return HStack(alignment: .top, spacing: mapControlDefaultSpacing) {
+            ZStack(alignment: .topLeading) {
+                landscapeTopHUDPrimaryButtons
+                    .zIndex(2)
 
-                    if showNavLocationReadout {
-                        topHUDCurrentLocation
-                            .frame(width: locationWidth, alignment: .leading)
+                if hasVisibleTopHUDShareControls || showNavLocationReadout {
+                    HStack(alignment: .center, spacing: 6) {
+                        if hasVisibleTopHUDShareControls {
+                            landscapeTopHUDShareButtons
+                        }
+
+                        if showNavLocationReadout {
+                            topHUDCurrentLocation
+                                .frame(width: locationWidth, alignment: .leading)
+                        }
                     }
-
-                    Spacer(minLength: 0)
+                    .offset(y: mapControlButtonSize + mapControlDefaultSpacing)
                 }
 
-                HStack(alignment: .center, spacing: 6) {
-                    if showNavKDLGButton {
-                        topHUDKDLGButton
-                            .fixedSize(horizontal: true, vertical: false)
+                if showNavWindReadout || showNavSpeedReadout || showNavBoundaryReadout {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if showNavWindReadout {
+                            topHUDWindForecast
+                                .frame(width: landscapeWindReadoutWidth, alignment: .leading)
+                        }
+
+                        if showNavSpeedReadout || showNavBoundaryReadout {
+                            HStack(alignment: .center, spacing: 6) {
+                                if showNavSpeedReadout {
+                                    topHUDSpeedReadout
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+
+                                if showNavBoundaryReadout {
+                                    topHUDBoundaryReadout
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.65)
+                                }
+                            }
+                            .frame(width: centerReadoutWidth, alignment: .leading)
+                        }
                     }
-
-                    if showNavWindReadout {
-                        topHUDWindForecast
-                    }
-
-                    Spacer(minLength: 0)
-                }
-
-                HStack(alignment: .center, spacing: 6) {
-                    Color.clear
-                        .frame(width: controlWidth + 2, height: 1)
-                        .accessibilityHidden(true)
-
-                    if showNavSpeedReadout {
-                        topHUDSpeedReadout
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-
-                    if showNavBoundaryReadout {
-                        topHUDBoundaryReadout
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.65)
-                    }
-
-                    Spacer(minLength: 0)
+                    .frame(width: centerReadoutWidth, alignment: .topLeading)
+                    .offset(x: centerReadoutLeading)
                 }
             }
             .frame(width: leftWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
@@ -1601,6 +1620,10 @@ struct MapView: View {
                 offlineModeHUDPlaceholder
                     .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topTrailing)
             }
+
+            if showsActionColumn {
+                landscapeTopHUDActionButtons
+            }
         }
         .frame(
             maxWidth: .infinity,
@@ -1610,15 +1633,92 @@ struct MapView: View {
         )
     }
 
+    private var landscapeTopHUDPrimaryButtons: some View {
+        HStack(spacing: mapControlDefaultSpacing) {
+            topHUDExpandCollapseButton
+            fishTicketOCRButton
+            mapAppearancePlaceholderButton
+
+            if showNavKDLGButton {
+                topHUDKDLGMapButton
+            }
+        }
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
+    private var landscapeTopHUDShareButtons: some View {
+        HStack(spacing: mapControlDefaultSpacing) {
+            if showNavShareLiveButton {
+                liveShareToggleButton
+            } else {
+                Color.clear
+                    .frame(width: mapControlButtonSize, height: mapControlButtonSize)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+            }
+
+            if showNavSendLocationButton {
+                sendLocationPinButton
+            }
+        }
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
+    private var landscapeTopHUDActionButtons: some View {
+        VStack(spacing: mapControlDefaultSpacing) {
+            if showNavRecordSetButton {
+                recordSetButton
+            }
+
+            if showNavCreateWaypointButton {
+                createWaypointButton
+            }
+        }
+        .fixedSize(horizontal: true, vertical: true)
+        .frame(
+            width: mapControlButtonSize,
+            height: landscapeTopHUDBoxHeight,
+            alignment: .topTrailing
+        )
+    }
+
+    private var landscapeWindReadoutWidth: CGFloat {
+        112
+    }
+
+    private var topHUDKDLGMapButton: some View {
+        Button {
+            kdlgRadioPlayer.togglePlayback()
+        } label: {
+            Text("KDLG")
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .buttonStyle(
+            MapIconButtonStyle(
+                isActive: false,
+                foreground: kdlgRadioPlayer.isPlaying ? .green : .yellow
+            )
+        )
+        .accessibilityLabel(kdlgRadioPlayer.isOn ? "Stop KDLG radio" : "Play KDLG radio")
+    }
+
     private var landscapeExpandedTideWidth: CGFloat {
         let shortScreenSide = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
         let portraitAvailableWidth = max(0, shortScreenSide - 20)
         let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
-        return compactExpandedTideWidth(
+        let previousWidth = compactExpandedTideWidth(
             availableWidth: portraitAvailableWidth,
             landscape: false,
             controlWidth: controlWidth
         )
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return previousWidth
+        }
+
+        return min(previousWidth, 164)
     }
 
     private func responsiveTopHUDLandscapeTopRow(availableWidth: CGFloat) -> some View {
@@ -2102,7 +2202,7 @@ struct MapView: View {
     }
 
     private var landscapeTopHUDBoxHeight: CGFloat {
-        104
+        (mapControlButtonSize * 2) + mapControlDefaultSpacing
     }
 
     private var landscapeTopHUDMiniTideChartHeight: CGFloat {
