@@ -1527,40 +1527,55 @@ struct MapView: View {
     }
 
     private func landscapeExpandedTopHUD(availableWidth: CGFloat) -> some View {
-        let tideWidth = landscapeExpandedTideWidth
         let contentWidth = max(0, availableWidth - 8)
         let showsTideColumn = showNavTideHUD || showOfflineModeInTopHUDLocation
         let showsActionColumn = hasVisibleTopHUDActionControls
-        let visibleTrailingColumnCount = (showsTideColumn ? 1 : 0) + (showsActionColumn ? 1 : 0)
-        let trailingColumnSpacing = CGFloat(visibleTrailingColumnCount) * mapControlDefaultSpacing
         let actionColumnWidth = showsActionColumn ? mapControlButtonSize : 0
-        let leftWidth = max(
-            0,
-            contentWidth
-                - (showsTideColumn ? tideWidth : 0)
-                - actionColumnWidth
-                - trailingColumnSpacing
-        )
         let primaryButtonCount = 3 + (showNavKDLGButton ? 1 : 0)
         let primaryButtonWidth = buttonGroupWidth(
             count: primaryButtonCount,
             spacing: mapControlDefaultSpacing
-        )
-        let windWidth = showNavWindReadout ? landscapeWindReadoutWidth : 0
-        let centerReadoutLeading = primaryButtonWidth + max(
-            0,
-            (leftWidth - primaryButtonWidth - windWidth) / 2
         )
         let shareButtonWidth = hasVisibleTopHUDShareControls
             ? buttonGroupWidth(count: 2, spacing: mapControlDefaultSpacing)
             : 0
         let locationLeading = shareButtonWidth
             + (hasVisibleTopHUDShareControls && showNavLocationReadout ? 6 : 0)
+        let desiredLocationTrailing = showNavLocationReadout
+            ? locationLeading + topHUDLocationFixedWidth
+            : 0
+        let desiredReadoutTrailing = primaryButtonWidth
+            + mapControlDefaultSpacing
+            + (showNavWindReadout ? landscapeWindReadoutWidth : 0)
+        let desiredLeftWidth = max(
+            primaryButtonWidth,
+            desiredLocationTrailing,
+            desiredReadoutTrailing
+        )
+        let actionReserve = actionColumnWidth
+            + (showsActionColumn ? mapControlDefaultSpacing : 0)
+        let widthBeforeActionColumn = max(0, contentWidth - actionReserve)
+        let tideSpacing = showsTideColumn ? mapControlDefaultSpacing : 0
+        let maximumLeftWidth = max(
+            0,
+            widthBeforeActionColumn
+                - tideSpacing
+                - (showsTideColumn ? landscapeMinimumTideWidth : 0)
+        )
+        let leftWidth = min(
+            desiredLeftWidth,
+            showsTideColumn ? maximumLeftWidth : widthBeforeActionColumn
+        )
+        let tideWidth = showsTideColumn
+            ? max(0, widthBeforeActionColumn - leftWidth - tideSpacing)
+            : 0
         let locationWidth = min(
             topHUDLocationFixedWidth,
             max(0, leftWidth - locationLeading)
         )
+        let centerReadoutLeading = primaryButtonWidth + mapControlDefaultSpacing
         let centerReadoutWidth = max(0, leftWidth - centerReadoutLeading)
+        let windReadoutWidth = min(landscapeWindReadoutWidth, centerReadoutWidth)
 
         return HStack(alignment: .top, spacing: mapControlDefaultSpacing) {
             ZStack(alignment: .topLeading) {
@@ -1585,7 +1600,7 @@ struct MapView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         if showNavWindReadout {
                             topHUDWindForecast
-                                .frame(width: landscapeWindReadoutWidth, alignment: .leading)
+                                .frame(width: windReadoutWidth, alignment: .leading)
                         }
 
                         if showNavSpeedReadout || showNavBoundaryReadout {
@@ -1704,7 +1719,7 @@ struct MapView: View {
         .accessibilityLabel(kdlgRadioPlayer.isOn ? "Stop KDLG radio" : "Play KDLG radio")
     }
 
-    private var landscapeExpandedTideWidth: CGFloat {
+    private var landscapeMinimumTideWidth: CGFloat {
         let shortScreenSide = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
         let portraitAvailableWidth = max(0, shortScreenSide - 20)
         let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
