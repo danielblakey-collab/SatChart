@@ -1,0 +1,82 @@
+--- OfflinePack.swift
++++ OfflinePack.swift
+@@ -1,15 +1,17 @@
+ import Foundation
++
++struct OfflinePack: Identifiable, Hashable {
++    let district: DistrictID
++    let slug: String            // e.g. "egegik", "egegik_v2", "noaa_bristol_bay"
++
++    var id: String { slug }
++}
+ 
+ enum PackVariant: String, CaseIterable, Identifiable {
+     case v1
+     case v2
+     // later: case lowTide, midTide, highTide, etc.
+-    struct OfflinePack: Identifiable, Hashable {
+-        let district: DistrictID
+-        let slug: String            // e.g. "egegik", "egegik_v2"
+ 
+-        var id: String { slug }
+-    }
+     var id: String { rawValue }
+ 
+     var displayName: String {
+--- OfflineMapsManager.swift
++++ OfflineMapsManager.swift
+@@ -1,14 +1,5 @@
+ import Foundation
+ import Combine
+-
+-/// Represents one downloadable MBTiles file + preview image.
+-/// `slug` is the filename WITHOUT extension (e.g. "egegik", "egegik_v2")
+-struct OfflinePack: Identifiable, Hashable {
+-    let district: DistrictID
+-    let slug: String
+-
+-    var id: String { slug }
+-}
+ 
+ @MainActor
+ final class OfflineMapsManager: NSObject, ObservableObject {
+--- OfflinePackInstaller.swift
++++ OfflinePackInstaller.swift
+@@ -6,6 +6,17 @@
+ enum OfflineInstallError: Error {
+     case noPackFound
+     case shaMismatch(expected: String, actual: String)
++}
++
++private struct Manifest: Decodable {
++    let packs: [Pack]
++}
++
++private struct Pack: Decodable {
++    let id: String
++    let version: Int
++    let url: String
++    let sha256: String
+ }
+ 
+ @MainActor
+--- OfflineMapsView.swift
++++ OfflineMapsView.swift
+@@ -1,5 +1,8 @@
+ import SwiftUI
+ import UIKit
++
++private let offlineMapsNavBarUIColor = UIColor(red: 0.03, green: 0.23, blue: 0.48, alpha: 1.0)
++private let offlineMapsNavBarColor = Color(uiColor: offlineMapsNavBarUIColor)
+ 
+ struct OfflineMapsView: View {
+ 
+@@ -122,7 +125,7 @@
+         .foregroundColor(.white)
+         .navigationTitle("Offline Maps")
+         .navigationBarTitleDisplayMode(.inline)
+-        .toolbarBackground(bbMenuBlue, for: .navigationBar)
++        .toolbarBackground(offlineMapsNavBarColor, for: .navigationBar)
+         .toolbarBackground(.visible, for: .navigationBar)
+         .toolbarColorScheme(.dark, for: .navigationBar)
+         .toolbar {

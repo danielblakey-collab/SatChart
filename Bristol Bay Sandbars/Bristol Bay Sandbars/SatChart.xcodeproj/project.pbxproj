@@ -1,0 +1,731 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		20257B1C2F58EDEA00DFAE40 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 20257B1B2F58EDEA00DFAE40 /* libsqlite3.tbd */; };
+		20257B212F591F6600DFAE40 /* ExportSockeyePerBoatDailyWindowed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20257B202F591F6600DFAE40 /* ExportSockeyePerBoatDailyWindowed.swift */; };
+		2037099E2EF6B21400E53C8E /* MapTiles in Resources */ = {isa = PBXBuildFile; fileRef = 2037099D2EF6B21400E53C8E /* MapTiles */; };
+		203709D62EF8FA8D00E53C8E /* District_Boundaries_Final.geojson in Resources */ = {isa = PBXBuildFile; fileRef = 203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */; };
+		20370E0A2F0DDDB700E53C8E /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 20370E092F0DDDB700E53C8E /* FirebaseAuth */; };
+		20370E0C2F0DDDB700E53C8E /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */; };
+		20370E0E2F0DE49A00E53C8E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */; };
+		20370E102F0DE49B00E53C8E /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 20370E0F2F0DE49B00E53C8E /* FirebaseFunctions */; };
+		20702CEB2F54D73B00C81D17 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 20702CEA2F54D73B00C81D17 /* GRDB */; };
+		20702CEE2F54D75D00C81D17 /* Gzip in Frameworks */ = {isa = PBXBuildFile; productRef = 20702CED2F54D75D00C81D17 /* Gzip */; };
+		20A11F012F5B000100DFAE40 /* public in Resources */ = {isa = PBXBuildFile; fileRef = 20A11F002F5B000100DFAE40 /* public */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		20B878212F55523F002A30E7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 203709682EF6B00200E53C8E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2037096F2EF6B00200E53C8E;
+			remoteInfo = SatChart;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		20257B0F2F58EC1000DFAE40 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		20257B1B2F58EDEA00DFAE40 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk/usr/lib/libsqlite3.tbd; sourceTree = DEVELOPER_DIR; };
+		20257B202F591F6600DFAE40 /* ExportSockeyePerBoatDailyWindowed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSockeyePerBoatDailyWindowed.swift; sourceTree = "<group>"; };
+		20257B962F5CAA8800DFAE40 /* export_sockeye_per_boat_daily */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = export_sockeye_per_boat_daily; sourceTree = BUILT_PRODUCTS_DIR; };
+		203709702EF6B00200E53C8E /* SatChart.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SatChart.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2037099D2EF6B21400E53C8E /* MapTiles */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MapTiles; sourceTree = "<group>"; };
+		203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */ = {isa = PBXFileReference; lastKnownFileType = text; path = District_Boundaries_Final.geojson; sourceTree = "<group>"; };
+		20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		20A11F002F5B000100DFAE40 /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		20B8781D2F55523F002A30E7 /* SatChartTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SatChartTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		20257B282F59292500DFAE40 /* Exceptions for "export_sockeye_per_boat_daily" folder in "export_sockeye_per_boat_daily" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				main.swift,
+			);
+			target = 20257B102F58EC1000DFAE40 /* export_sockeye_per_boat_daily */;
+		};
+		20257B382F5A120F00DFAE40 /* Exceptions for "SatChart" folder in "export_sockeye_per_boat_daily" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				RegistrationEstimator.swift,
+			);
+			target = 20257B102F58EC1000DFAE40 /* export_sockeye_per_boat_daily */;
+		};
+		20257B412F5A94DF00DFAE40 /* Exceptions for "SatChart" folder in "SatChart" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				DailyDashboardView.swift,
+				RegistrationEstimatorDump.swift,
+			);
+			target = 2037096F2EF6B00200E53C8E /* SatChart */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		20257B122F58EC1000DFAE40 /* export_sockeye_per_boat_daily */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				20257B282F59292500DFAE40 /* Exceptions for "export_sockeye_per_boat_daily" folder in "export_sockeye_per_boat_daily" target */,
+			);
+			path = export_sockeye_per_boat_daily;
+			sourceTree = "<group>";
+		};
+		203709722EF6B00200E53C8E /* SatChart */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				20257B412F5A94DF00DFAE40 /* Exceptions for "SatChart" folder in "SatChart" target */,
+				20257B382F5A120F00DFAE40 /* Exceptions for "SatChart" folder in "export_sockeye_per_boat_daily" target */,
+			);
+			path = SatChart;
+			sourceTree = "<group>";
+		};
+		203709852EF6B04A00E53C8E /* AOI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AOI;
+			sourceTree = "<group>";
+		};
+		20B8781E2F55523F002A30E7 /* SatChartTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SatChartTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		20257B0E2F58EC1000DFAE40 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20257B1C2F58EDEA00DFAE40 /* libsqlite3.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2037096D2EF6B00200E53C8E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20702CEB2F54D73B00C81D17 /* GRDB in Frameworks */,
+				20370E0A2F0DDDB700E53C8E /* FirebaseAuth in Frameworks */,
+				20702CEE2F54D75D00C81D17 /* Gzip in Frameworks */,
+				20370E0C2F0DDDB700E53C8E /* FirebaseFirestore in Frameworks */,
+				20370E102F0DE49B00E53C8E /* FirebaseFunctions in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		20B8781A2F55523F002A30E7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		20257B1A2F58EDEA00DFAE40 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				20257B1B2F58EDEA00DFAE40 /* libsqlite3.tbd */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		203709672EF6B00200E53C8E = {
+			isa = PBXGroup;
+			children = (
+				20370E0D2F0DE49A00E53C8E /* GoogleService-Info.plist */,
+				2037099D2EF6B21400E53C8E /* MapTiles */,
+				203709852EF6B04A00E53C8E /* AOI */,
+				203709722EF6B00200E53C8E /* SatChart */,
+				20A11F002F5B000100DFAE40 /* public */,
+				20B8781E2F55523F002A30E7 /* SatChartTests */,
+				20257B122F58EC1000DFAE40 /* export_sockeye_per_boat_daily */,
+				203709712EF6B00200E53C8E /* Products */,
+				203709D52EF8FA8D00E53C8E /* District_Boundaries_Final.geojson */,
+				20257B1A2F58EDEA00DFAE40 /* Frameworks */,
+				20257B202F591F6600DFAE40 /* ExportSockeyePerBoatDailyWindowed.swift */,
+			);
+			sourceTree = "<group>";
+		};
+		203709712EF6B00200E53C8E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				203709702EF6B00200E53C8E /* SatChart.app */,
+				20B8781D2F55523F002A30E7 /* SatChartTests.xctest */,
+				20257B962F5CAA8800DFAE40 /* export_sockeye_per_boat_daily */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		20257B102F58EC1000DFAE40 /* export_sockeye_per_boat_daily */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 20257B152F58EC1000DFAE40 /* Build configuration list for PBXNativeTarget "export_sockeye_per_boat_daily" */;
+			buildPhases = (
+				20257B0D2F58EC1000DFAE40 /* Sources */,
+				20257B0E2F58EC1000DFAE40 /* Frameworks */,
+				20257B0F2F58EC1000DFAE40 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				20257B122F58EC1000DFAE40 /* export_sockeye_per_boat_daily */,
+			);
+			name = export_sockeye_per_boat_daily;
+			packageProductDependencies = (
+			);
+			productName = export_sockeye_per_boat_daily;
+			productReference = 20257B962F5CAA8800DFAE40 /* export_sockeye_per_boat_daily */;
+			productType = "com.apple.product-type.tool";
+		};
+		2037096F2EF6B00200E53C8E /* SatChart */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2037097D2EF6B00300E53C8E /* Build configuration list for PBXNativeTarget "SatChart" */;
+			buildPhases = (
+				2037096C2EF6B00200E53C8E /* Sources */,
+				2037096D2EF6B00200E53C8E /* Frameworks */,
+				2037096E2EF6B00200E53C8E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				203709722EF6B00200E53C8E /* SatChart */,
+				203709852EF6B04A00E53C8E /* AOI */,
+			);
+			name = SatChart;
+			packageProductDependencies = (
+				20370E092F0DDDB700E53C8E /* FirebaseAuth */,
+				20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */,
+				20370E0F2F0DE49B00E53C8E /* FirebaseFunctions */,
+				20702CEA2F54D73B00C81D17 /* GRDB */,
+				20702CED2F54D75D00C81D17 /* Gzip */,
+			);
+			productName = "Bristol Bay Sandbars";
+			productReference = 203709702EF6B00200E53C8E /* SatChart.app */;
+			productType = "com.apple.product-type.application";
+		};
+		20B8781C2F55523F002A30E7 /* SatChartTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 20B878232F55523F002A30E7 /* Build configuration list for PBXNativeTarget "SatChartTests" */;
+			buildPhases = (
+				20B878192F55523F002A30E7 /* Sources */,
+				20B8781A2F55523F002A30E7 /* Frameworks */,
+				20B8781B2F55523F002A30E7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				20B878222F55523F002A30E7 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				20B8781E2F55523F002A30E7 /* SatChartTests */,
+			);
+			name = SatChartTests;
+			packageProductDependencies = (
+			);
+			productName = SatChartTests;
+			productReference = 20B8781D2F55523F002A30E7 /* SatChartTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		203709682EF6B00200E53C8E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2610;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					20257B102F58EC1000DFAE40 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					2037096F2EF6B00200E53C8E = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					20B8781C2F55523F002A30E7 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 2037096F2EF6B00200E53C8E;
+					};
+				};
+			};
+			buildConfigurationList = 2037096B2EF6B00200E53C8E /* Build configuration list for PBXProject "SatChart" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 203709672EF6B00200E53C8E;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				20702CE92F54D73B00C81D17 /* XCRemoteSwiftPackageReference "GRDB" */,
+				20702CEC2F54D75D00C81D17 /* XCRemoteSwiftPackageReference "GzipSwift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 203709712EF6B00200E53C8E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2037096F2EF6B00200E53C8E /* SatChart */,
+				20B8781C2F55523F002A30E7 /* SatChartTests */,
+				20257B102F58EC1000DFAE40 /* export_sockeye_per_boat_daily */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2037096E2EF6B00200E53C8E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2037099E2EF6B21400E53C8E /* MapTiles in Resources */,
+				203709D62EF8FA8D00E53C8E /* District_Boundaries_Final.geojson in Resources */,
+				20370E0E2F0DE49A00E53C8E /* GoogleService-Info.plist in Resources */,
+				20A11F012F5B000100DFAE40 /* public in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		20B8781B2F55523F002A30E7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		20257B0D2F58EC1000DFAE40 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				20257B212F591F6600DFAE40 /* ExportSockeyePerBoatDailyWindowed.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2037096C2EF6B00200E53C8E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		20B878192F55523F002A30E7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		20B878222F55523F002A30E7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2037096F2EF6B00200E53C8E /* SatChart */;
+			targetProxy = 20B878212F55523F002A30E7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		20257B162F58EC1000DFAE40 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		20257B172F58EC1000DFAE40 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		2037097B2EF6B00300E53C8E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		2037097C2EF6B00300E53C8E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		2037097E2EF6B00300E53C8E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Bristol-Bay-Sandbars-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SatChart;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SatChart uses the camera to capture fish ticket photos for your logbook.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location is necessary in order to display where you are on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SatChart uses your photo library to select fish ticket photos for your logbook.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.curraghfisheries.Bristol-Bay-Sandbars";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2037097F2EF6B00300E53C8E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Bristol-Bay-Sandbars-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SatChart;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "SatChart uses the camera to capture fish ticket photos for your logbook.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location is necessary in order to display where you are on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SatChart uses your photo library to select fish ticket photos for your logbook.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.curraghfisheries.Bristol-Bay-Sandbars";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		20B878242F55523F002A30E7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curraghfisheries.SatChartTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SatChart.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SatChart";
+			};
+			name = Debug;
+		};
+		20B878252F55523F002A30E7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 64BCFUMP67;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.curraghfisheries.SatChartTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SatChart.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SatChart";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		20257B152F58EC1000DFAE40 /* Build configuration list for PBXNativeTarget "export_sockeye_per_boat_daily" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				20257B162F58EC1000DFAE40 /* Debug */,
+				20257B172F58EC1000DFAE40 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2037096B2EF6B00200E53C8E /* Build configuration list for PBXProject "SatChart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2037097B2EF6B00300E53C8E /* Debug */,
+				2037097C2EF6B00300E53C8E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2037097D2EF6B00300E53C8E /* Build configuration list for PBXNativeTarget "SatChart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2037097E2EF6B00300E53C8E /* Debug */,
+				2037097F2EF6B00300E53C8E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		20B878232F55523F002A30E7 /* Build configuration list for PBXNativeTarget "SatChartTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				20B878242F55523F002A30E7 /* Debug */,
+				20B878252F55523F002A30E7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.7.0;
+			};
+		};
+		20702CE92F54D73B00C81D17 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+		20702CEC2F54D75D00C81D17 /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/1024jp/GzipSwift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		20370E092F0DDDB700E53C8E /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		20370E0B2F0DDDB700E53C8E /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		20370E0F2F0DE49B00E53C8E /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20370E082F0DDDB700E53C8E /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		20702CEA2F54D73B00C81D17 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20702CE92F54D73B00C81D17 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+		20702CED2F54D75D00C81D17 /* Gzip */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 20702CEC2F54D75D00C81D17 /* XCRemoteSwiftPackageReference "GzipSwift" */;
+			productName = Gzip;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 203709682EF6B00200E53C8E /* Project object */;
+}
