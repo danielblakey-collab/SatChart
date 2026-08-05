@@ -1389,11 +1389,6 @@ struct SmartFishTicketOCRLaunchFlowView: View {
 // MARK: - Opening card
 
 private struct SmartLogbookOpeningCard: View {
-    private enum QCSheetCaptureMode {
-        case append
-        case replaceLast
-    }
-
     @Binding var opening: SmartLogbookOpening
     @ObservedObject var store: SmartLogbookStore
 
@@ -1421,7 +1416,6 @@ private struct SmartLogbookOpeningCard: View {
     @State private var showFishTicketSummaryCamera = false
     @State private var showFishTicketTallyCameraFlow = false
     @State private var showQCSheetCamera = false
-    @State private var qcSheetCaptureMode: QCSheetCaptureMode = .append
     @State private var isSavingQCSheet = false
     @State private var qcSheetStatus: String? = nil
     @State private var showClearWarning = false
@@ -2303,7 +2297,7 @@ private struct SmartLogbookOpeningCard: View {
 
                 if opening.qcSheetImageFilenames.isEmpty {
                     Button {
-                        startQCSheetCapture(mode: .append)
+                        startQCSheetCapture()
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "camera.fill")
@@ -2321,18 +2315,7 @@ private struct SmartLogbookOpeningCard: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     HStack(spacing: 8) {
                         Button {
-                            startQCSheetCapture(mode: .replaceLast)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "camera.fill")
-                                Text("Retake QC Sheet")
-                            }
-                        }
-                        .smartLogbookSmallPillButtonStyle(fillColor: smartLogbookCaptureYellow, textColor: .black)
-                        .disabled(isExtractingFishTicket || isSavingQCSheet)
-
-                        Button {
-                            startQCSheetCapture(mode: .append)
+                            startQCSheetCapture()
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "plus")
@@ -2934,9 +2917,8 @@ private struct SmartLogbookOpeningCard: View {
     }
 
     @MainActor
-    private func startQCSheetCapture(mode: QCSheetCaptureMode) {
+    private func startQCSheetCapture() {
         guard !isExtractingFishTicket, !isSavingQCSheet else { return }
-        qcSheetCaptureMode = mode
         showQCSheetCamera = true
     }
 
@@ -3071,7 +3053,6 @@ private struct SmartLogbookOpeningCard: View {
 
     @MainActor
     private func handleQCSheetCapture(_ image: UIImage) {
-        let captureMode = qcSheetCaptureMode
         let capturedImages = SmartFishTicketCapturedImageBatch([image])
         isSavingQCSheet = true
         qcSheetStatus = "Saving QC sheet photo…"
@@ -3085,23 +3066,8 @@ private struct SmartLogbookOpeningCard: View {
                 return
             }
 
-            switch captureMode {
-            case .append:
-                opening.qcSheetImageFilenames.append(savedFilename)
-            case .replaceLast:
-                if let previousFilename = opening.qcSheetImageFilenames.last {
-                    opening.qcSheetImageFilenames[opening.qcSheetImageFilenames.count - 1] = savedFilename
-                    if previousFilename != savedFilename {
-                        SmartFishTicketStorage.deleteImage(named: previousFilename)
-                    }
-                } else {
-                    opening.qcSheetImageFilenames.append(savedFilename)
-                }
-            }
-
-            qcSheetStatus = captureMode == .append
-                ? "QC sheet photo added."
-                : "QC sheet photo retaken."
+            opening.qcSheetImageFilenames.append(savedFilename)
+            qcSheetStatus = "QC sheet photo added."
         }
     }
 
