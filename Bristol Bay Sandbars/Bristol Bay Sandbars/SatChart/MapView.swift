@@ -236,6 +236,106 @@ private enum MapViewTideStationPreference {
     }
 }
 
+/// Keep each coordinate field's modifier chain behind a concrete view boundary.
+/// This prevents SwiftUI from building one deeply nested generic type for all six
+/// fields, which can overflow the Swift runtime metadata decoder on physical devices.
+private struct HUDCoordinateInputField: View {
+    let placeholder: String
+    @Binding var text: String
+    let width: CGFloat
+    let keyboardType: UIKeyboardType
+    let onSubmit: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundColor(.white)
+            .tint(.blue)
+            .autocorrectionDisabled(true)
+            .textInputAutocapitalization(.characters)
+            .keyboardType(keyboardType)
+            .submitLabel(.done)
+            .focused($isFocused)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .frame(width: width, height: 20)
+            .background(Color.white.opacity(0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(isFocused ? Color.blue : Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .onSubmit {
+                onSubmit()
+                isFocused = false
+            }
+    }
+}
+
+private struct HUDCoordinateEntryFields: View {
+    @Binding var latitudeDegrees: String
+    @Binding var latitudeMinutes: String
+    @Binding var latitudeHemisphere: String
+    @Binding var longitudeDegrees: String
+    @Binding var longitudeMinutes: String
+    @Binding var longitudeHemisphere: String
+    let onSubmit: () -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                coordinateGroup(
+                    degrees: $latitudeDegrees,
+                    minutes: $latitudeMinutes,
+                    hemisphere: $latitudeHemisphere,
+                    hemispherePlaceholder: "N/S"
+                )
+
+                coordinateGroup(
+                    degrees: $longitudeDegrees,
+                    minutes: $longitudeMinutes,
+                    hemisphere: $longitudeHemisphere,
+                    hemispherePlaceholder: "E/W"
+                )
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private func coordinateGroup(
+        degrees: Binding<String>,
+        minutes: Binding<String>,
+        hemisphere: Binding<String>,
+        hemispherePlaceholder: String
+    ) -> some View {
+        HStack(spacing: 3) {
+            HUDCoordinateInputField(
+                placeholder: "Deg",
+                text: degrees,
+                width: 34,
+                keyboardType: .numbersAndPunctuation,
+                onSubmit: onSubmit
+            )
+            HUDCoordinateInputField(
+                placeholder: "Min",
+                text: minutes,
+                width: 57,
+                keyboardType: .numbersAndPunctuation,
+                onSubmit: onSubmit
+            )
+            HUDCoordinateInputField(
+                placeholder: hemispherePlaceholder,
+                text: hemisphere,
+                width: 30,
+                keyboardType: .asciiCapable,
+                onSubmit: onSubmit
+            )
+        }
+    }
+}
+
 // MARK: - MapView (main map screen)
 
 struct MapView: View {
@@ -339,12 +439,6 @@ struct MapView: View {
     @State private var liveShareResumeBannerUntil: Date? = nil
     @State private var nowTick: Date = Date()
     @State private var lastExpiredOwnPinCleanupAt: Date? = nil
-
-    private enum CoordField: Hashable {
-        case latDeg, latMin, latHem
-        case lonDeg, lonMin, lonHem
-    }
-    @FocusState private var focusedCoordField: CoordField?
 
     private var liveUpdateSeconds: TimeInterval {
         LiveLocationUpdateOption(rawValue: liveLocationUpdateOptionRaw)?.seconds
@@ -1967,22 +2061,15 @@ struct MapView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    HStack(spacing: 3) {
-                        coordTextField("Deg", text: $cursorLatDegInput, focused: .latDeg, width: 34)
-                        coordTextField("Min", text: $cursorLatMinInput, focused: .latMin, width: 57)
-                        hemTextField("N/S", text: $cursorLatHemInput, focused: .latHem, width: 30)
-                    }
-
-                    HStack(spacing: 3) {
-                        coordTextField("Deg", text: $cursorLonDegInput, focused: .lonDeg, width: 34)
-                        coordTextField("Min", text: $cursorLonMinInput, focused: .lonMin, width: 57)
-                        hemTextField("E/W", text: $cursorLonHemInput, focused: .lonHem, width: 30)
-                    }
-                }
-                .fixedSize(horizontal: true, vertical: false)
-            }
+            HUDCoordinateEntryFields(
+                latitudeDegrees: $cursorLatDegInput,
+                latitudeMinutes: $cursorLatMinInput,
+                latitudeHemisphere: $cursorLatHemInput,
+                longitudeDegrees: $cursorLonDegInput,
+                longitudeMinutes: $cursorLonMinInput,
+                longitudeHemisphere: $cursorLonHemInput,
+                onSubmit: applyCursorInputsAndPan
+            )
 
             liveCursorStatusIndicator
         }
@@ -2094,57 +2181,6 @@ struct MapView: View {
 
         return maxValue
     }
-    private func coordTextField(_ placeholder: String, text: Binding<String>, focused: CoordField, width: CGFloat) -> some View {
-        TextField(placeholder, text: text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundColor(.white)
-            .tint(.blue)
-            .autocorrectionDisabled(true)
-            .textInputAutocapitalization(.characters)
-            .keyboardType(.numbersAndPunctuation)
-            .submitLabel(.done)
-            .focused($focusedCoordField, equals: focused)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .frame(width: width, height: 20)
-            .background(Color.white.opacity(0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(focusedCoordField == focused ? Color.blue : Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .onTapGesture { focusedCoordField = focused }
-            .onSubmit { applyCursorInputsAndPan(); focusedCoordField = nil }
-    }
-
-    private func hemTextField(
-        _ placeholder: String,
-        text: Binding<String>,
-        focused: CoordField,
-        width: CGFloat = 38
-    ) -> some View {
-        TextField(placeholder, text: text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundColor(.white)
-            .tint(.blue)
-            .autocorrectionDisabled(true)
-            .textInputAutocapitalization(.characters)
-            .keyboardType(.asciiCapable)
-            .submitLabel(.done)
-            .focused($focusedCoordField, equals: focused)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .frame(width: width, height: 20)
-            .background(Color.white.opacity(0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(focusedCoordField == focused ? Color.blue : Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .onTapGesture { focusedCoordField = focused }
-            .onSubmit { applyCursorInputsAndPan(); focusedCoordField = nil }
-    }
-
     private var bottomControls: some View {
         GeometryReader { proxy in
             VStack {
