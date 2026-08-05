@@ -63,6 +63,45 @@ struct SatChartTests {
     }
 
     @MainActor
+    @Test func assignedSetAppearsOnDeliveryAndShowSetUpdatesNavigationMap() throws {
+        let persistenceURL = Self.tempLogbookURL()
+        defer { try? FileManager.default.removeItem(at: persistenceURL) }
+
+        let store = SmartLogbookStore(persistenceURL: persistenceURL)
+        let startedAt = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 18, hour: 8)))
+        let deliveryID = try #require(store.addOCRDeliveryDraft(on: startedAt, fallbackDistrict: .nushagak))
+        let savedSet = try #require(
+            store.addFishingSet(
+                SmartFishingSetRecord(
+                    startedAt: startedAt,
+                    endedAt: startedAt.addingTimeInterval(3_600),
+                    locations: [],
+                    locationLabel: "Test Set",
+                    assignedDeliveryOpeningID: deliveryID,
+                    catchText: "1,250 lbs",
+                    pickingMinutes: 45,
+                    notes: "Strong ebb",
+                    displayOnNavPage: false
+                ),
+                fallbackDistrict: .nushagak
+            )
+        )
+
+        let linkedSet = try #require(store.assignedFishingSets(forOpeningID: deliveryID).first)
+        #expect(linkedSet.id == savedSet.id)
+        #expect(linkedSet.catchText == "1,250 lbs")
+        #expect(linkedSet.pickingMinutes == 45)
+        #expect(linkedSet.notes == "Strong ebb")
+        #expect(store.displayedFishingSetsOnNavPage.isEmpty)
+
+        let setBinding = try #require(store.bindingForFishingSet(setID: savedSet.id))
+        setBinding.wrappedValue.displayOnNavPage = true
+
+        #expect(store.assignedFishingSets(forOpeningID: deliveryID).first?.displayOnNavPage == true)
+        #expect(store.displayedFishingSetsOnNavPage.map(\.id) == [savedSet.id])
+    }
+
+    @MainActor
     @Test func oneHundredSameDayDeliveryDraftsRemainCreatableAndOrdered() throws {
         let persistenceURL = Self.tempLogbookURL()
         defer { try? FileManager.default.removeItem(at: persistenceURL) }
