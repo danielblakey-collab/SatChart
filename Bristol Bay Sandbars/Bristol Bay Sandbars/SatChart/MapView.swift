@@ -646,7 +646,7 @@ struct MapView: View {
     // MARK: - Sharing helpers
 
     private var liveShareStatusColor: Color {
-        radioGroup.isLiveSharing ? .green : .red
+        radioGroup.isLiveSharing ? .green : .white
     }
 
     private var isShareOnceFlashing: Bool {
@@ -1240,14 +1240,10 @@ struct MapView: View {
     private func landscapeTopHUDCenteredWidth(screenWidth: CGFloat, safeAreaInsets: EdgeInsets) -> CGFloat {
         let extraSafeGap: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 8 : 4
         let sideInset = max(
-            landscapeHUDOuterHorizontalPadding,
+            landscapeBottomHUDOuterHorizontalPadding,
             max(safeAreaInsets.leading, safeAreaInsets.trailing) + extraSafeGap
         )
-        let safeCenteredWidth = max(0, screenWidth - (sideInset * 2))
-        let preferredMaxWidth = UIDevice.current.userInterfaceIdiom == .pad
-            ? min(screenWidth * 0.92, 1020)
-            : min(screenWidth * 0.94, 780)
-        return min(safeCenteredWidth, preferredMaxWidth)
+        return max(0, screenWidth - (sideInset * 2))
     }
 
     private func landscapeHUDCenteringOffset(safeAreaInsets: EdgeInsets) -> CGFloat {
@@ -1370,12 +1366,12 @@ struct MapView: View {
             } else {
                 compactExpandedTopHUDHeader(availableWidth: availableWidth, landscape: landscape)
 
-                if showNavSpeedReadout || showNavKDLGButton || showNavWindReadout {
-                    compactTopHUDStatusRow
+                if showNavSpeedReadout || showNavWindReadout {
+                    compactTopHUDStatusRow(availableWidth: availableWidth, landscape: landscape)
                 }
 
-                if showNavLocationReadout {
-                    topHUDCurrentLocation
+                if showNavLocationReadout || showNavKDLGButton {
+                    compactTopHUDLocationRow
                 }
 
                 if showLiveShareResumeBanner {
@@ -1412,11 +1408,10 @@ struct MapView: View {
                 }
             }
         }
-        .padding(.leading, 4)
-        .padding(.trailing, 4)
-        .padding(.vertical, 4)
-        .frame(width: landscape ? availableWidth : nil, alignment: .topLeading)
-        .background(scSurface.opacity(0.78))
+        .padding(.horizontal, isTopHUDCollapsed ? 0 : 4)
+        .padding(.vertical, isTopHUDCollapsed ? 0 : 4)
+        .frame(width: availableWidth, alignment: .topLeading)
+        .background(isTopHUDCollapsed ? Color.clear : scSurface.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
@@ -1441,6 +1436,8 @@ struct MapView: View {
             }
             .frame(width: controlWidth, alignment: .topLeading)
 
+            Spacer(minLength: 8)
+
             if showNavTideHUD {
                 tideHUDBox
                     .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
@@ -1449,7 +1446,6 @@ struct MapView: View {
                     .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
             }
 
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -1474,26 +1470,45 @@ struct MapView: View {
         return min(previousWidth * 0.5, inlineAvailableWidth)
     }
 
-    private var compactTopHUDStatusRow: some View {
-        HStack(alignment: .center, spacing: 6) {
+    private func compactTopHUDStatusRow(availableWidth: CGFloat, landscape: Bool) -> some View {
+        let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
+        let tideWidth = compactExpandedTideWidth(
+            availableWidth: availableWidth,
+            landscape: landscape,
+            controlWidth: controlWidth
+        )
+
+        return HStack(alignment: .center, spacing: 0) {
             if showNavSpeedReadout {
                 topHUDSpeedReadout
                     .fixedSize(horizontal: true, vertical: false)
+            }
+
+            Spacer(minLength: 6)
+
+            if showNavWindReadout {
+                topHUDWindForecast
+                    .frame(width: tideWidth, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+    }
+
+    private var compactTopHUDLocationRow: some View {
+        HStack(alignment: .center, spacing: 6) {
+            if showNavLocationReadout {
+                topHUDCurrentLocation
+            } else {
+                Spacer(minLength: 0)
             }
 
             if showNavKDLGButton {
                 topHUDKDLGButton
                     .fixedSize(horizontal: true, vertical: false)
             }
-
-            if showNavWindReadout {
-                topHUDWindForecast
-            }
-
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
     }
 
     private func responsiveTopHUDLandscapeTopRow(availableWidth: CGFloat) -> some View {
@@ -1689,31 +1704,44 @@ struct MapView: View {
         }
         .buttonStyle(
             MapIconButtonStyle(
-                isActive: isRecording,
-                foreground: isRecording ? .black : .orange,
-                background: isRecording ? Color.orange.opacity(0.68) : nil
+                isActive: false,
+                foreground: isRecording ? .orange : .white
             )
         )
     }
 
     private var topHUDControlRow: some View {
-        HStack(spacing: mapControlDefaultSpacing) {
+        HStack(spacing: 0) {
             topHUDExpandCollapseButton
 
-            if showNavShareLiveButton {
-                liveShareToggleButton
-            }
-            if showNavSendLocationButton {
-                sendLocationPinButton
-            }
-            if showNavRecordSetButton {
-                recordSetButton
-            }
-            if showNavCreateWaypointButton {
-                createWaypointButton
+            if showNavShareLiveButton || showNavSendLocationButton {
+                Spacer()
+                    .frame(width: mapControlButtonSize)
+
+                HStack(spacing: mapControlDefaultSpacing) {
+                    if showNavShareLiveButton {
+                        liveShareToggleButton
+                    }
+                    if showNavSendLocationButton {
+                        sendLocationPinButton
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: true)
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: mapControlDefaultSpacing)
+
+            if showNavRecordSetButton || showNavCreateWaypointButton {
+                HStack(spacing: mapControlDefaultSpacing) {
+                    if showNavRecordSetButton {
+                        recordSetButton
+                    }
+                    if showNavCreateWaypointButton {
+                        createWaypointButton
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1778,10 +1806,16 @@ struct MapView: View {
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .lineLimit(1)
 
-            Text(Self.recordSetButtonElapsedText(from: session.startedAt, to: now))
-                .font(.system(size: 13, weight: .heavy, design: .monospaced))
-                .minimumScaleFactor(0.70)
-                .lineLimit(1)
+            HStack(spacing: 2) {
+                Image(systemName: "timer.circle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+
+                Text(Self.recordSetButtonElapsedText(from: session.startedAt, to: now))
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                    .minimumScaleFactor(0.64)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1795,7 +1829,6 @@ struct MapView: View {
             Image(systemName: "timer.circle.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundColor(.orange)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
