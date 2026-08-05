@@ -1529,59 +1529,69 @@ struct MapView: View {
     private func landscapeExpandedTopHUD(availableWidth: CGFloat) -> some View {
         let tideWidth = landscapeExpandedTideWidth
         let contentWidth = max(0, availableWidth - 8)
-        let tideSpacing: CGFloat = (showNavTideHUD || showOfflineModeInTopHUDLocation) ? 8 : 0
-        let leftWidth = max(0, contentWidth - tideWidth - tideSpacing)
+        let showsTideColumn = showNavTideHUD || showOfflineModeInTopHUDLocation
+        let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
+        let columnGapCount: CGFloat = showsTideColumn ? 2 : 1
+        let middleWidth = max(
+            0,
+            contentWidth
+                - controlWidth
+                - (showsTideColumn ? tideWidth : 0)
+                - (columnGapCount * 8)
+        )
 
-        return HStack(alignment: .top, spacing: tideSpacing) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 8) {
-                    topHUDExpandedControlButtons
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                topHUDExpandedControlButtons
+                    .zIndex(2)
 
-                    if showNavSpeedReadout {
-                        topHUDSpeedReadout
-                            .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .top, spacing: 6) {
+                        if showNavWindReadout {
+                            topHUDWindForecast
+                        }
+
+                        if showNavKDLGButton {
+                            topHUDKDLGButton
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+
+                        Spacer(minLength: 0)
                     }
 
-                    if showNavWindReadout {
-                        topHUDWindForecast
-                    }
+                    HStack(alignment: .center, spacing: 6) {
+                        if showNavBoundaryReadout {
+                            topHUDBoundaryReadout
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+                        }
 
-                    Spacer(minLength: 0)
+                        if showNavSpeedReadout {
+                            topHUDSpeedReadout
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
                 }
+                .frame(width: middleWidth, height: topHUDBoxHeight, alignment: .topLeading)
 
-                Spacer(minLength: 4)
-
-                HStack(alignment: .bottom, spacing: 6) {
-                    if showNavBoundaryReadout {
-                        topHUDBoundaryReadout
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.65)
-                    }
-
-                    if showNavLocationReadout {
-                        topHUDCurrentLocation
-                            .frame(width: topHUDLocationFixedWidth, alignment: .leading)
-                    }
-
-                    if showNavKDLGButton {
-                        topHUDKDLGButton
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-
-                    Spacer(minLength: 0)
+                if showNavTideHUD {
+                    tideHUDBox
+                        .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
+                } else if showOfflineModeInTopHUDLocation {
+                    offlineModeHUDPlaceholder
+                        .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
                 }
             }
-            .frame(width: leftWidth, height: topHUDBoxHeight, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: topHUDBoxHeight, maxHeight: topHUDBoxHeight, alignment: .topLeading)
 
-            if showNavTideHUD {
-                tideHUDBox
-                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
-            } else if showOfflineModeInTopHUDLocation {
-                offlineModeHUDPlaceholder
-                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+            if showNavLocationReadout {
+                topHUDCurrentLocation
+                    .frame(width: topHUDLocationFixedWidth, alignment: .leading)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: topHUDBoxHeight, maxHeight: topHUDBoxHeight, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var landscapeExpandedTideWidth: CGFloat {
@@ -1849,6 +1859,9 @@ struct MapView: View {
                 .font(.system(size: 19, weight: .bold))
         }
         .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .white))
+        .contentShape(Rectangle())
+        .zIndex(10)
+        .accessibilityIdentifier("navigationTopHUDExpandCollapseButton")
         .accessibilityLabel(isTopHUDCollapsed ? "Expand top navigation HUD" : "Collapse top navigation HUD")
     }
 
