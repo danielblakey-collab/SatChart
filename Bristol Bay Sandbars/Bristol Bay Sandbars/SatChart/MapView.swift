@@ -1311,7 +1311,10 @@ struct MapView: View {
     }
 
     private var hasVisibleTopActionRow: Bool {
-        hasVisibleTopHUDShareControls || hasVisibleTopHUDActionControls
+        if showNavTopHUDDisplay && isTopHUDCollapsed {
+            return false
+        }
+        return hasVisibleTopHUDShareControls || hasVisibleTopHUDActionControls
     }
 
     private var visibleBottomMainButtonCount: Int {
@@ -1361,39 +1364,18 @@ struct MapView: View {
     }
 
     private func responsiveTopHUDCard(availableWidth: CGFloat, landscape: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            topHUDControlRow
+        VStack(alignment: .leading, spacing: 4) {
+            if isTopHUDCollapsed {
+                topHUDControlRow
+            } else {
+                compactExpandedTopHUDHeader(availableWidth: availableWidth, landscape: landscape)
 
-            if !isTopHUDCollapsed {
-                if landscape {
-                    responsiveTopHUDLandscapeTopRow(availableWidth: availableWidth)
-                } else {
-                    let panelWidth = portraitHUDPanelWidth(for: availableWidth)
-                    let showOfflineModePlaceholder = showOfflineModeInTopHUDLocation
-                    let singlePanelWidth = min(max(availableWidth, 0), UIDevice.current.userInterfaceIdiom == .pad ? 460 : 430)
+                if showNavSpeedReadout || showNavKDLGButton || showNavWindReadout {
+                    compactTopHUDStatusRow
+                }
 
-                    if showNavTideHUD || showOfflineModePlaceholder {
-                        HStack(alignment: .top, spacing: 8) {
-                            if showNavTideHUD {
-                                tideHUDBox
-                                    .frame(width: singlePanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-                            }
-
-                            if showOfflineModePlaceholder {
-                                offlineModeHUDPlaceholder
-                                    .frame(width: singlePanelWidth, height: topHUDBoxHeight, alignment: .topTrailing)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    }
-
-                    if hasVisibleTopHUDLocationSpeedRow {
-                        topHUDCurrentLocationAndSpeedRow
-                    }
-
-                    if hasVisibleTopHUDSecondaryReadouts {
-                        responsiveTopHUDLocationReadouts(tideBoxWidth: panelWidth)
-                    }
+                if showNavLocationReadout {
+                    topHUDCurrentLocation
                 }
 
                 if showLiveShareResumeBanner {
@@ -1432,10 +1414,86 @@ struct MapView: View {
         }
         .padding(.leading, 4)
         .padding(.trailing, 4)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .frame(width: landscape ? availableWidth : nil, alignment: .topLeading)
         .background(scSurface.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func compactExpandedTopHUDHeader(availableWidth: CGFloat, landscape: Bool) -> some View {
+        let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
+        let tideWidth = compactExpandedTideWidth(
+            availableWidth: availableWidth,
+            landscape: landscape,
+            controlWidth: controlWidth
+        )
+
+        return HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                topHUDExpandedControlButtons
+
+                if showNavBoundaryReadout {
+                    topHUDBoundaryReadout
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                        .frame(width: controlWidth, alignment: .leading)
+                }
+            }
+            .frame(width: controlWidth, alignment: .topLeading)
+
+            if showNavTideHUD {
+                tideHUDBox
+                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
+            } else if showOfflineModeInTopHUDLocation {
+                offlineModeHUDPlaceholder
+                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func compactExpandedTideWidth(
+        availableWidth: CGFloat,
+        landscape: Bool,
+        controlWidth: CGFloat
+    ) -> CGFloat {
+        let previousWidth: CGFloat
+        if landscape {
+            previousWidth = landscapeInlineTidePanelWidth(for: availableWidth)
+        } else {
+            previousWidth = min(
+                max(availableWidth, 0),
+                UIDevice.current.userInterfaceIdiom == .pad ? 460 : 430
+            )
+        }
+
+        let contentWidth = max(0, availableWidth - 8)
+        let inlineAvailableWidth = max(0, contentWidth - controlWidth - 8)
+        return min(previousWidth * 0.5, inlineAvailableWidth)
+    }
+
+    private var compactTopHUDStatusRow: some View {
+        HStack(alignment: .center, spacing: 6) {
+            if showNavSpeedReadout {
+                topHUDSpeedReadout
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            if showNavKDLGButton {
+                topHUDKDLGButton
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            if showNavWindReadout {
+                topHUDWindForecast
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
     }
 
     private func responsiveTopHUDLandscapeTopRow(availableWidth: CGFloat) -> some View {
@@ -1641,21 +1699,32 @@ struct MapView: View {
     private var topHUDControlRow: some View {
         HStack(spacing: mapControlDefaultSpacing) {
             topHUDExpandCollapseButton
-            fishTicketOCRButton
-            mapAppearancePlaceholderButton
 
-            if isTopHUDCollapsed {
-                if showNavShareLiveButton {
-                    liveShareToggleButton
-                }
-                if showNavSendLocationButton {
-                    sendLocationPinButton
-                }
+            if showNavShareLiveButton {
+                liveShareToggleButton
+            }
+            if showNavSendLocationButton {
+                sendLocationPinButton
+            }
+            if showNavRecordSetButton {
+                recordSetButton
+            }
+            if showNavCreateWaypointButton {
+                createWaypointButton
             }
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var topHUDExpandedControlButtons: some View {
+        HStack(spacing: mapControlDefaultSpacing) {
+            topHUDExpandCollapseButton
+            fishTicketOCRButton
+            mapAppearancePlaceholderButton
+        }
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private var topHUDExpandCollapseButton: some View {
