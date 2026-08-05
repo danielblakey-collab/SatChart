@@ -156,6 +156,7 @@ struct MapViewRepresentable: UIViewRepresentable {
     @Binding var cursorDistanceText: String
     @Binding var cursorCoordText: String
     @Binding var cursorPanRequest: Int
+    @Binding var isCursorTrackingUser: Bool
 
     @Binding var waypoints: [Waypoint]
     let receivedWaypoints: [RadioGroupStore.GroupWaypoint]
@@ -189,6 +190,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         cursorDistanceText: Binding<String>,
         cursorCoordText: Binding<String>,
         cursorPanRequest: Binding<Int>,
+        isCursorTrackingUser: Binding<Bool>,
         waypoints: Binding<[Waypoint]>,
         receivedWaypoints: [RadioGroupStore.GroupWaypoint],
         radioPins: [RadioGroupStore.Pin],
@@ -218,6 +220,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         self._cursorDistanceText = cursorDistanceText
         self._cursorCoordText = cursorCoordText
         self._cursorPanRequest = cursorPanRequest
+        self._isCursorTrackingUser = isCursorTrackingUser
         self._waypoints = waypoints
         self.receivedWaypoints = receivedWaypoints
         self.radioPins = radioPins
@@ -249,12 +252,14 @@ struct MapViewRepresentable: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         let followBinding = $isFollowingUser
+        let cursorTrackingBinding = $isCursorTrackingUser
 
         return Coordinator(
             minZForTiles: minZForTiles,
             maxZ: maxZ,
             maxZForTiles: maxZForTiles,
             initialLaunchZoom: initialLaunchZoom,
+            initialCursorTrackingUser: isCursorTrackingUser,
             onDistanceText: { distanceText = $0 },
             onSpeedText: { speedText = $0 },
             onMetersPerPoint: { metersPerPoint = $0 },
@@ -267,6 +272,11 @@ struct MapViewRepresentable: UIViewRepresentable {
                 cursorCoordinate = coord
                 cursorDistanceText = distText
                 cursorCoordText = coordText
+            },
+            onCursorTrackingStateChanged: { isTrackingUser in
+                DispatchQueue.main.async {
+                    cursorTrackingBinding.wrappedValue = isTrackingUser
+                }
             },
             onFishingSetDisplayPrompt: { setID in
                 onFishingSetDisplayPrompt(setID)
@@ -755,6 +765,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         private let onMetersPerPoint: (Double) -> Void
         let onFollowStateChanged: (Bool) -> Void
         private let onCursorUpdated: (CLLocationCoordinate2D?, String, String) -> Void
+        private let onCursorTrackingStateChanged: (Bool) -> Void
         private let onFishingSetDisplayPrompt: (UUID) -> Void
 
         var isFollowingUser: Bool = false
@@ -986,7 +997,12 @@ struct MapViewRepresentable: UIViewRepresentable {
         private(set) var metersPerPoint: Double = 0
 
         // Cursor behavior
-        var cursorFollowsUser: Bool = true
+        var cursorFollowsUser: Bool = true {
+            didSet {
+                guard cursorFollowsUser != oldValue else { return }
+                onCursorTrackingStateChanged(cursorFollowsUser)
+            }
+        }
 
         // MARK: - Follow smoothing
         // Smoothed coordinate used for camera follow + (optionally) cursor follow.
@@ -1136,11 +1152,13 @@ struct MapViewRepresentable: UIViewRepresentable {
             maxZ: Double,
             maxZForTiles: Int,
             initialLaunchZoom: Double,
+            initialCursorTrackingUser: Bool,
             onDistanceText: @escaping (String) -> Void,
             onSpeedText: @escaping (String) -> Void,
             onMetersPerPoint: @escaping (Double) -> Void,
             onFollowStateChanged: @escaping (Bool) -> Void,
             onCursorUpdated: @escaping (CLLocationCoordinate2D?, String, String) -> Void,
+            onCursorTrackingStateChanged: @escaping (Bool) -> Void,
             onFishingSetDisplayPrompt: @escaping (UUID) -> Void
         ) {
             self.minZForTiles = minZForTiles
@@ -1152,7 +1170,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             self.onMetersPerPoint = onMetersPerPoint
             self.onFollowStateChanged = onFollowStateChanged
             self.onCursorUpdated = onCursorUpdated
+            self.onCursorTrackingStateChanged = onCursorTrackingStateChanged
             self.onFishingSetDisplayPrompt = onFishingSetDisplayPrompt
+            self.cursorFollowsUser = initialCursorTrackingUser
         }
 
         // MARK: - Cursor tap

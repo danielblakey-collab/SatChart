@@ -284,6 +284,7 @@ struct MapView: View {
     @State private var cursorLonMinInput: String = ""
     @State private var cursorLonHemInput: String = "W"
     @State private var cursorPanRequest: Int = 0
+    @State private var isCursorTrackingUser: Bool = true
 
     // Sharing
     @AppStorage("radioPinDisplayName") private var radioPinDisplayName: String = ""
@@ -297,7 +298,7 @@ struct MapView: View {
     @AppStorage("sstDateUTC") private var sstDateUTC: String = SeaSurfaceTemperatureOverlay.defaultDateUTC()
     @AppStorage("showPortMollerTestFisheryStations") private var showPortMollerTestFisheryStations: Bool = true
     @AppStorage("navShowTopHUDDisplay") private var showNavTopHUDDisplay: Bool = true
-    @AppStorage("navShowCursorHUD") private var showNavCursorHUD: Bool = true
+    @AppStorage("navTopHUDCollapsed") private var isTopHUDCollapsed: Bool = false
     @AppStorage("navShowTideHUD") private var showNavTideHUD: Bool = true
     @AppStorage("navShowLocationReadout") private var showNavLocationReadout: Bool = true
     @AppStorage("navShowBoundaryReadout") private var showNavBoundaryReadout: Bool = true
@@ -1006,6 +1007,7 @@ struct MapView: View {
             cursorDistanceText: $cursorDistanceText,
             cursorCoordText: $cursorCoordText,
             cursorPanRequest: $cursorPanRequest,
+            isCursorTrackingUser: $isCursorTrackingUser,
             waypoints: $waypoints,
             receivedWaypoints: radioGroup.receivedWaypoints,
             radioPins: radioGroup.pins,
@@ -1176,12 +1178,6 @@ struct MapView: View {
         )
     }
 
-    private var hasActiveTopHUDMessage: Bool {
-        if let until = bigToastUntil, Date() < until { return true }
-        if let until = toastUntil, Date() < until { return true }
-        return false
-    }
-
     private var isOfflineAccountMode: Bool {
         authStore.isUsingCachedOfflineAccountGate
     }
@@ -1199,17 +1195,7 @@ struct MapView: View {
     }
 
     private var hasVisibleTopHUDContent: Bool {
-        showNavTopHUDDisplay && (
-            showNavCursorHUD ||
-            showNavTideHUD ||
-            showOfflineModeInTopHUDLocation ||
-            showNavLocationReadout ||
-            showNavBoundaryReadout ||
-            showNavSpeedReadout ||
-            showNavWindReadout ||
-            showNavKDLGButton ||
-            hasActiveTopHUDMessage
-        )
+        showNavTopHUDDisplay
     }
 
     private var hasVisibleTopHUDLocationSpeedRow: Bool {
@@ -1221,7 +1207,9 @@ struct MapView: View {
     }
 
     private var hasVisibleTopHUDShareControls: Bool {
-        showNavTopHUDDisplay && (showNavShareLiveButton || showNavSendLocationButton)
+        showNavTopHUDDisplay
+            && !isTopHUDCollapsed
+            && (showNavShareLiveButton || showNavSendLocationButton)
     }
 
     private var hasVisibleTopHUDActionControls: Bool {
@@ -1280,87 +1268,72 @@ struct MapView: View {
 
     private func responsiveTopHUDCard(availableWidth: CGFloat, landscape: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if landscape {
-                if hasVisibleTopHUDContent {
+            topHUDControlRow
+
+            if !isTopHUDCollapsed {
+                if landscape {
                     responsiveTopHUDLandscapeTopRow(availableWidth: availableWidth)
-                }
-            } else {
-                let panelWidth = portraitHUDPanelWidth(for: availableWidth)
-                let panelSpacing = portraitHUDPanelSpacing(for: availableWidth)
-                let showOfflineModePlaceholder = showOfflineModeInTopHUDLocation
-                let visiblePrimaryPanelCount = (showNavCursorHUD ? 1 : 0) + ((showNavTideHUD || showOfflineModePlaceholder) ? 1 : 0)
-                let hasMultiplePrimaryPanels = visiblePrimaryPanelCount > 1
-                let singlePanelWidth = min(max(availableWidth, 0), UIDevice.current.userInterfaceIdiom == .pad ? 460 : 430)
-                let activePanelWidth = hasMultiplePrimaryPanels ? panelWidth : singlePanelWidth
+                } else {
+                    let panelWidth = portraitHUDPanelWidth(for: availableWidth)
+                    let showOfflineModePlaceholder = showOfflineModeInTopHUDLocation
+                    let singlePanelWidth = min(max(availableWidth, 0), UIDevice.current.userInterfaceIdiom == .pad ? 460 : 430)
 
-                if visiblePrimaryPanelCount > 0 {
-                    HStack(alignment: .top, spacing: 0) {
-                        if showNavCursorHUD {
-                            topHUDCursorPanel
-                                .frame(width: activePanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-                        }
-
-                        if showNavCursorHUD && (showNavTideHUD || showOfflineModePlaceholder) {
-                            Spacer(minLength: panelSpacing)
-                        }
-
-                        if showNavTideHUD {
-                            tideHUDBox
-                                .frame(width: activePanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-                        }
-
-                        if showOfflineModePlaceholder {
-                            if !showNavCursorHUD {
-                                Spacer(minLength: 0)
+                    if showNavTideHUD || showOfflineModePlaceholder {
+                        HStack(alignment: .top, spacing: 8) {
+                            if showNavTideHUD {
+                                tideHUDBox
+                                    .frame(width: singlePanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
                             }
 
-                            offlineModeHUDPlaceholder
-                                .frame(width: activePanelWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+                            if showOfflineModePlaceholder {
+                                offlineModeHUDPlaceholder
+                                    .frame(width: singlePanelWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                    if hasVisibleTopHUDLocationSpeedRow {
+                        topHUDCurrentLocationAndSpeedRow
+                    }
+
+                    if hasVisibleTopHUDSecondaryReadouts {
+                        responsiveTopHUDLocationReadouts(tideBoxWidth: panelWidth)
+                    }
                 }
 
-                if hasVisibleTopHUDLocationSpeedRow {
-                    topHUDCurrentLocationAndSpeedRow
+                if showLiveShareResumeBanner {
+                    liveShareResumeBanner
                 }
 
-                if hasVisibleTopHUDSecondaryReadouts {
-                    responsiveTopHUDLocationReadouts(tideBoxWidth: panelWidth)
+                if let msg = bigToastMessage, let until = bigToastUntil, Date() < until {
+                    Text(msg)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 10)
+                        .background(scSurfaceAlt.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
                 }
-            }
 
-            if showLiveShareResumeBanner {
-                liveShareResumeBanner
-            }
-
-            if let msg = bigToastMessage, let until = bigToastUntil, Date() < until {
-                Text(msg)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.82)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 10)
-                    .background(scSurfaceAlt.opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                    )
-            }
-
-            if let msg = toastMessage, let until = toastUntil, Date() < until {
-                Text(msg)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundColor(scTextPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.82)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, -2)
+                if let msg = toastMessage, let until = toastUntil, Date() < until {
+                    Text(msg)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(scTextPrimary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, -2)
+                }
             }
         }
         .padding(.leading, 4)
@@ -1386,7 +1359,7 @@ struct MapView: View {
     private func landscapeInlineTideHUDRow(availableWidth: CGFloat) -> some View {
         let panelWidth = landscapeInlineTidePanelWidth(for: availableWidth)
         let showOfflineModePlaceholder = showOfflineModeInTopHUDLocation
-        let visiblePanelCount = (showNavCursorHUD ? 1 : 0) + ((showNavTideHUD || showOfflineModePlaceholder) ? 1 : 0)
+        let visiblePanelCount = (showNavTideHUD || showOfflineModePlaceholder) ? 1 : 0
         let visibleReadoutStack = showNavLocationReadout
             || showNavBoundaryReadout
             || showNavSpeedReadout
@@ -1398,12 +1371,6 @@ struct MapView: View {
         let readoutWidth = max(0, availableWidth - usedPanelWidth - usedPanelSpacing - readoutGap)
 
         return HStack(alignment: .top, spacing: 8) {
-            if showNavCursorHUD {
-                topHUDCursorPanel
-                    .frame(width: panelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-                    .layoutPriority(1)
-            }
-
             if showNavTideHUD {
                 tideHUDBox
                     .frame(width: panelWidth, height: topHUDBoxHeight, alignment: .topLeading)
@@ -1426,17 +1393,8 @@ struct MapView: View {
     }
 
     private func landscapeTopHUDLocationBar(width: CGFloat) -> some View {
-        Text("Location: \(locationText)")
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundColor(scTextPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
-            .truncationMode(.middle)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
+        topHUDCurrentLocation
             .frame(width: max(width, 0), alignment: .leading)
-            .background(scSurface.opacity(0.70))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func landscapeTopHUDReadoutStack(availableWidth: CGFloat) -> some View {
@@ -1535,7 +1493,6 @@ struct MapView: View {
                     HStack(spacing: mapControlDefaultSpacing) {
                         if showNavRecordSetButton {
                             recordSetButton
-                            fishTicketOCRButton
                         }
                         if showNavCreateWaypointButton { createWaypointButton }
                     }
@@ -1552,7 +1509,6 @@ struct MapView: View {
 
                 if showNavRecordSetButton {
                     recordSetButton
-                    fishTicketOCRButton
                 }
                 if showNavCreateWaypointButton { createWaypointButton }
             }
@@ -1588,6 +1544,39 @@ struct MapView: View {
         )
     }
 
+    private var topHUDControlRow: some View {
+        HStack(spacing: mapControlDefaultSpacing) {
+            topHUDExpandCollapseButton
+            fishTicketOCRButton
+            mapAppearancePlaceholderButton
+
+            if isTopHUDCollapsed {
+                if showNavShareLiveButton {
+                    liveShareToggleButton
+                }
+                if showNavSendLocationButton {
+                    sendLocationPinButton
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var topHUDExpandCollapseButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.20)) {
+                isTopHUDCollapsed.toggle()
+            }
+        } label: {
+            Image(systemName: isTopHUDCollapsed ? "chevron.down" : "chevron.up")
+                .font(.system(size: 19, weight: .bold))
+        }
+        .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .white))
+        .accessibilityLabel(isTopHUDCollapsed ? "Expand top navigation HUD" : "Collapse top navigation HUD")
+    }
+
 
     private var fishTicketOCRButton: some View {
         Button {
@@ -1606,6 +1595,18 @@ struct MapView: View {
             )
         )
         .accessibilityLabel("Open fish ticket OCR")
+    }
+
+    private var mapAppearancePlaceholderButton: some View {
+        Button {} label: {
+            Image(systemName: "sun.max.fill")
+                .font(.system(size: 19, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundColor(.yellow)
+        }
+        .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .yellow))
+        .accessibilityLabel("Map brightness and contrast controls")
+        .accessibilityHint("Controls will be added in a future update")
     }
 
     private func activeRecordSetButtonLabel(session: ActiveFishingSetSession, now: Date) -> some View {
@@ -1756,66 +1757,6 @@ struct MapView: View {
         .accessibilityValue("\(activeOwnSharedLocationPinCount) active shared location pins")
     }
 
-    private var landscapeFullSizeLocationButtons: some View {
-        HStack(alignment: .top, spacing: 8) {
-            sendLocationPinButton
-            liveShareToggleButton
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-
-    private var topHUDShareButtons: some View {
-        Group {
-            if isLandscapeMode {
-                EmptyView()
-            } else {
-                HStack(spacing: 10) {
-                    if showNavTopHUDDisplay && showNavShareLiveButton { liveShareToggleButton }
-                    if showNavTopHUDDisplay && showNavSendLocationButton { sendLocationPinButton }
-
-                    Spacer(minLength: 0)
-
-                    if showNavRecordSetButton {
-                        recordSetButton
-                        fishTicketOCRButton
-                    }
-                    if showNavCreateWaypointButton { createWaypointButton }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 0)
-            }
-        }
-    }
-
-    private var topHUDCursorPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            topHUDHeaderRow
-            topHUDLatLonFields
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .background(scSurface.opacity(0.70))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
-    }
-
-    private var topHUDHeaderRow: some View {
-        HStack(spacing: 8) {
-            Text("Cursor:")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.95))
-            Text(cursorCoordinate == nil ? "—" : (cursorDistanceText == "—" ? "—" : cursorDistanceText))
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
-            Spacer(minLength: 0)
-            liveCursorStatusIndicator
-        }
-    }
-
     private var liveCursorStatusIndicator: some View {
         Group {
             if radioGroup.isLiveSharing {
@@ -1847,72 +1788,15 @@ struct MapView: View {
     }
 
     private var topHUDMiniTideChartHeight: CGFloat {
-        // Keeps the tide chart, title row, and event row inside the same 84-pt visual height as the cursor HUD.
+        // Keeps the tide chart, title row, and event row inside the compact 84-pt visual height.
         UIDevice.current.userInterfaceIdiom == .pad ? 32 : 31
     }
     private var isLandscapeMode: Bool {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
 
-    private var landscapeHUDPanelWidth: CGFloat {
-        let outerInset = topHUDOuterHorizontalPadding * 2
-        return min(max((UIScreen.main.bounds.width - outerInset - 320) / 3.0, 150), 210)
-    }
-
-    private var landscapeHUDClusterWidth: CGFloat {
-        (landscapeHUDPanelWidth * 2) + 8
-    }
-
-    private var topHUDLandscapeTopRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                topHUDCursorPanel
-                    .frame(width: landscapeHUDPanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-
-                tideHUDBox
-                    .frame(width: landscapeHUDPanelWidth, height: topHUDBoxHeight, alignment: .topLeading)
-            }
-            .frame(width: landscapeHUDClusterWidth, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 6) {
-                topHUDCurrentLocation
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .center, spacing: 8) {
-                            topHUDBoundaryReadout
-                                .fixedSize(horizontal: true, vertical: false)
-
-                            Spacer(minLength: 0)
-
-                            topHUDKDLGButton
-
-                            Spacer(minLength: 0)
-
-                            topHUDWindForecast
-                        }
-
-                        HStack(alignment: .center, spacing: 8) {
-                            topHUDSpeedReadout
-                                .fixedSize(horizontal: true, vertical: false)
-
-                            Spacer(minLength: 0)
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    landscapeFullSizeLocationButtons
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var topHUDCurrentLocationAndSpeedRow: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if showNavLocationReadout {
                 topHUDCurrentLocation
             }
@@ -1922,6 +1806,7 @@ struct MapView: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var offlineModeHUDBadge: some View {
@@ -2075,11 +1960,35 @@ struct MapView: View {
     }
 
     private var topHUDCurrentLocation: some View {
-        Text("Location: \(locationText)")
-            .hudBoxSmall()
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 6) {
+            Text(isCursorTrackingUser ? "Location:" : "Cursor:")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(scTextPrimary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    HStack(spacing: 3) {
+                        coordTextField("Deg", text: $cursorLatDegInput, focused: .latDeg, width: 34)
+                        coordTextField("Min", text: $cursorLatMinInput, focused: .latMin, width: 57)
+                        hemTextField("N/S", text: $cursorLatHemInput, focused: .latHem, width: 30)
+                    }
+
+                    HStack(spacing: 3) {
+                        coordTextField("Deg", text: $cursorLonDegInput, focused: .lonDeg, width: 34)
+                        coordTextField("Min", text: $cursorLonMinInput, focused: .lonMin, width: 57)
+                        hemTextField("E/W", text: $cursorLonHemInput, focused: .lonHem, width: 30)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            liveCursorStatusIndicator
+        }
+        .hudBoxSmall()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private var topHUDWindForecast: some View {
@@ -2185,26 +2094,6 @@ struct MapView: View {
 
         return maxValue
     }
-    private var topHUDLatLonFields: some View {
-        VStack(alignment: .leading, spacing: 6) { topHUDLatRow; topHUDLonRow }
-    }
-
-    private var topHUDLatRow: some View {
-        HStack(spacing: 6) {
-            coordTextField("Deg", text: $cursorLatDegInput, focused: .latDeg, width: 44)
-            coordTextField("Min", text: $cursorLatMinInput, focused: .latMin, width: 70)
-            hemTextField("N/S", text: $cursorLatHemInput, focused: .latHem)
-        }
-    }
-
-    private var topHUDLonRow: some View {
-        HStack(spacing: 6) {
-            coordTextField("Deg", text: $cursorLonDegInput, focused: .lonDeg, width: 44)
-            coordTextField("Min", text: $cursorLonMinInput, focused: .lonMin, width: 70)
-            hemTextField("E/W", text: $cursorLonHemInput, focused: .lonHem)
-        }
-    }
-
     private func coordTextField(_ placeholder: String, text: Binding<String>, focused: CoordField, width: CGFloat) -> some View {
         TextField(placeholder, text: text)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -2228,7 +2117,12 @@ struct MapView: View {
             .onSubmit { applyCursorInputsAndPan(); focusedCoordField = nil }
     }
 
-    private func hemTextField(_ placeholder: String, text: Binding<String>, focused: CoordField) -> some View {
+    private func hemTextField(
+        _ placeholder: String,
+        text: Binding<String>,
+        focused: CoordField,
+        width: CGFloat = 38
+    ) -> some View {
         TextField(placeholder, text: text)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .foregroundColor(.white)
@@ -2240,7 +2134,7 @@ struct MapView: View {
             .focused($focusedCoordField, equals: focused)
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
-            .frame(width: 38, height: 20)
+            .frame(width: width, height: 20)
             .background(Color.white.opacity(0.16))
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
@@ -2630,7 +2524,6 @@ struct MapView: View {
                 HStack(spacing: spacing) {
                     if showNavRecordSetButton {
                         recordSetButton
-                        fishTicketOCRButton
                     }
                     if showNavCreateWaypointButton { createWaypointButton }
                     if showNavMapSelector { mapVersionCycleButton(width: selectorWidth) }
@@ -2646,7 +2539,7 @@ struct MapView: View {
     }
 
     private func landscapeSelectorWidth(availableWidth: CGFloat, includesSetButtons: Bool) -> CGFloat {
-        let setButtonCount = includesSetButtons ? ((showNavRecordSetButton ? 2 : 0) + (showNavCreateWaypointButton ? 1 : 0)) : 0
+        let setButtonCount = includesSetButtons ? ((showNavRecordSetButton ? 1 : 0) + (showNavCreateWaypointButton ? 1 : 0)) : 0
         let setButtonAllowance: CGFloat = setButtonCount > 0
             ? (CGFloat(setButtonCount) * mapControlButtonSize) + (CGFloat(max(setButtonCount - 1, 0)) * mapControlDefaultSpacing)
             : 0
@@ -3482,21 +3375,6 @@ struct MapView: View {
         return remainderHours == 0 ? "\(days)d" : "\(days)d\(remainderHours)h"
     }
 
-    private var locationText: String {
-        if let coord = locationManager.userLocation { return degreesDecimalMinutes(coord) }
-        return "—"
-    }
-
-    private func degreesDecimalMinutes(_ c: CLLocationCoordinate2D) -> String {
-        func format(_ deg: Double, pos: String, neg: String) -> String {
-            let hemisphere = deg >= 0 ? pos : neg
-            let absDeg = abs(deg)
-            let d = Int(absDeg)
-            let minutes = (absDeg - Double(d)) * 60.0
-            return String(format: "%d° %.3f' %@", d, minutes, hemisphere)
-        }
-        return "\(format(c.latitude, pos: "N", neg: "S"))  \(format(c.longitude, pos: "E", neg: "W"))"
-    }
 }
 
 
@@ -5843,7 +5721,6 @@ struct SettingsDataAcknowledgmentsPageView: View {
 struct SettingsScreenLayoutOptionsPageView: View {
     @AppStorage("showPortMollerTestFisheryStations") private var showPortMollerTestFisheryStations: Bool = true
     @AppStorage("navShowTopHUDDisplay") private var showNavTopHUDDisplay: Bool = true
-    @AppStorage("navShowCursorHUD") private var showNavCursorHUD: Bool = true
     @AppStorage("navShowTideHUD") private var showNavTideHUD: Bool = true
     @AppStorage("navShowLocationReadout") private var showNavLocationReadout: Bool = true
     @AppStorage("navShowBoundaryReadout") private var showNavBoundaryReadout: Bool = true
@@ -5913,12 +5790,11 @@ struct SettingsScreenLayoutOptionsPageView: View {
             VStack(spacing: 8) {
                 settingsToggle(
                     title: "Top HUD Display",
-                    subtitle: "Turns the entire top HUD card on/off. When off, Share Live and Send Location are also removed from the Navigation screen.",
+                    subtitle: "Turns the top HUD, its expand/collapse control, OCR camera, and map appearance button on/off.",
                     isOn: $showNavTopHUDDisplay
                 )
-                settingsToggle(title: "Cursor HUD", subtitle: "Shows the cursor distance and latitude/longitude entry box.", isOn: $showNavCursorHUD)
                 settingsToggle(title: "Tides HUD", subtitle: "Shows the compact tide chart and tide event summary.", isOn: $showNavTideHUD)
-                settingsToggle(title: "Location Readout", subtitle: "Shows the current location text readout.", isOn: $showNavLocationReadout)
+                settingsToggle(title: "Location Readout", subtitle: "Shows the editable user-location or cursor latitude/longitude row.", isOn: $showNavLocationReadout)
                 settingsToggle(title: "Boundary Readout", subtitle: "Shows the distance-to-boundary readout.", isOn: $showNavBoundaryReadout)
                 settingsToggle(title: "Speed Readout", subtitle: "Shows vessel/user speed in the top HUD.", isOn: $showNavSpeedReadout)
                 settingsToggle(title: "Wind Readout", subtitle: "Shows the compact wind forecast indicator.", isOn: $showNavWindReadout)
@@ -5940,7 +5816,7 @@ struct SettingsScreenLayoutOptionsPageView: View {
                 settingsToggle(title: "Share Live Button", subtitle: "Shows the live location sharing button when Top HUD Display is also on.", isOn: $showNavShareLiveButton)
                 settingsToggle(title: "Live Share Trail", subtitle: "Shows the fading trail behind Radio Group live location pins.", isOn: $showNavLiveLocationTrail)
                 settingsToggle(title: "Send Location Button", subtitle: "Shows the one-time location pin button when Top HUD Display is also on.", isOn: $showNavSendLocationButton)
-                settingsToggle(title: "Record Set Button", subtitle: "Shows the Record Set recorder and adjacent fish-ticket OCR camera button.", isOn: $showNavRecordSetButton)
+                settingsToggle(title: "Record Set Button", subtitle: "Shows the Record Set recorder.", isOn: $showNavRecordSetButton)
                 settingsToggle(title: "Create Waypoint Button", subtitle: "Shows the create waypoint button.", isOn: $showNavCreateWaypointButton)
                 settingsToggle(title: "Zoom In Button", subtitle: "Shows the map zoom-in button.", isOn: $showNavZoomInButton)
                 settingsToggle(title: "Zoom Out Button", subtitle: "Shows the map zoom-out button.", isOn: $showNavZoomOutButton)
