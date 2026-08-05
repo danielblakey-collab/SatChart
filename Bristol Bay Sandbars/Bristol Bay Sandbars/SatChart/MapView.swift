@@ -1364,14 +1364,18 @@ struct MapView: View {
             if isTopHUDCollapsed {
                 topHUDControlRow
             } else {
-                compactExpandedTopHUDHeader(availableWidth: availableWidth, landscape: landscape)
+                if landscape {
+                    landscapeExpandedTopHUD(availableWidth: availableWidth)
+                } else {
+                    compactExpandedTopHUDHeader(availableWidth: availableWidth, landscape: false)
 
-                if showNavSpeedReadout || showNavWindReadout {
-                    compactTopHUDStatusRow(availableWidth: availableWidth, landscape: landscape)
-                }
+                    if showNavSpeedReadout || showNavWindReadout {
+                        compactTopHUDStatusRow(availableWidth: availableWidth, landscape: false)
+                    }
 
-                if showNavLocationReadout || showNavKDLGButton {
-                    compactTopHUDLocationRow
+                    if showNavLocationReadout || showNavKDLGButton {
+                        compactTopHUDLocationRow
+                    }
                 }
 
                 if showLiveShareResumeBanner {
@@ -1499,6 +1503,7 @@ struct MapView: View {
         HStack(alignment: .center, spacing: 6) {
             if showNavLocationReadout {
                 topHUDCurrentLocation
+                    .frame(width: topHUDLocationFixedWidth, alignment: .leading)
             } else {
                 Spacer(minLength: 0)
             }
@@ -1509,6 +1514,85 @@ struct MapView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var topHUDLocationFixedWidth: CGFloat {
+        let shortScreenSide = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+        let portraitOuterInsets: CGFloat = 20
+        let expandedCardInsets: CGFloat = 8
+        let kdlgAllowance: CGFloat = 46
+        let available = shortScreenSide - portraitOuterInsets - expandedCardInsets - kdlgAllowance
+        let maximum: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 430 : 340
+        return min(max(available, 220), maximum)
+    }
+
+    private func landscapeExpandedTopHUD(availableWidth: CGFloat) -> some View {
+        let tideWidth = landscapeExpandedTideWidth
+        let contentWidth = max(0, availableWidth - 8)
+        let tideSpacing: CGFloat = (showNavTideHUD || showOfflineModeInTopHUDLocation) ? 8 : 0
+        let leftWidth = max(0, contentWidth - tideWidth - tideSpacing)
+
+        return HStack(alignment: .top, spacing: tideSpacing) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    topHUDExpandedControlButtons
+
+                    if showNavSpeedReadout {
+                        topHUDSpeedReadout
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    if showNavWindReadout {
+                        topHUDWindForecast
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Spacer(minLength: 4)
+
+                HStack(alignment: .bottom, spacing: 6) {
+                    if showNavBoundaryReadout {
+                        topHUDBoundaryReadout
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                    }
+
+                    if showNavLocationReadout {
+                        topHUDCurrentLocation
+                            .frame(width: topHUDLocationFixedWidth, alignment: .leading)
+                    }
+
+                    if showNavKDLGButton {
+                        topHUDKDLGButton
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(width: leftWidth, height: topHUDBoxHeight, alignment: .topLeading)
+
+            if showNavTideHUD {
+                tideHUDBox
+                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
+            } else if showOfflineModeInTopHUDLocation {
+                offlineModeHUDPlaceholder
+                    .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: topHUDBoxHeight, maxHeight: topHUDBoxHeight, alignment: .topLeading)
+    }
+
+    private var landscapeExpandedTideWidth: CGFloat {
+        let shortScreenSide = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+        let portraitAvailableWidth = max(0, shortScreenSide - 20)
+        let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
+        return compactExpandedTideWidth(
+            availableWidth: portraitAvailableWidth,
+            landscape: false,
+            controlWidth: controlWidth
+        )
     }
 
     private func responsiveTopHUDLandscapeTopRow(availableWidth: CGFloat) -> some View {
