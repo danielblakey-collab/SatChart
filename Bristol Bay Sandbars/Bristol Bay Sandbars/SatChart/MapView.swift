@@ -1558,7 +1558,7 @@ struct MapView: View {
             + (hasVisibleTopHUDShareControls && showNavLocationReadout ? 6 : 0)
         let locationWidth = min(
             topHUDLocationFixedWidth,
-            max(0, centerReadoutLeading - locationLeading - 4)
+            max(0, leftWidth - locationLeading)
         )
         let centerReadoutWidth = max(0, leftWidth - centerReadoutLeading)
 
