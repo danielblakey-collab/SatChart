@@ -646,7 +646,15 @@ struct MapView: View {
     // MARK: - Sharing helpers
 
     private var liveShareStatusColor: Color {
-        radioGroup.isLiveSharing ? .green : .white
+        if radioGroup.isLiveSharing {
+            return .green
+        }
+
+        if radioGroup.canShareLocation, radioGroup.activeGroupID != nil {
+            return .red
+        }
+
+        return .white
     }
 
     private var isShareOnceFlashing: Bool {
@@ -1986,8 +1994,12 @@ struct MapView: View {
                 isTopHUDCollapsed.toggle()
             }
         } label: {
-            Image(systemName: isTopHUDCollapsed ? "chevron.down" : "chevron.up")
-                .font(.system(size: 19, weight: .bold))
+            Image(
+                systemName: isTopHUDCollapsed
+                    ? "arrow.up.left.and.arrow.down.right"
+                    : "arrow.down.right.and.arrow.up.left"
+            )
+            .font(.system(size: 18, weight: .bold))
         }
         .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .white))
         .contentShape(Rectangle())
@@ -2005,12 +2017,12 @@ struct MapView: View {
             Image(systemName: "camera.fill")
                 .font(.system(size: 19, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundColor(Color(uiColor: UIColor(red: 0.95, green: 0.78, blue: 0.18, alpha: 1.0)))
+                .foregroundColor(.white)
         }
         .buttonStyle(
             MapIconButtonStyle(
                 isActive: false,
-                foreground: Color(uiColor: UIColor(red: 0.95, green: 0.78, blue: 0.18, alpha: 1.0))
+                foreground: .white
             )
         )
         .accessibilityLabel("Open fish ticket OCR")
@@ -2021,9 +2033,9 @@ struct MapView: View {
             Image(systemName: "sun.max.fill")
                 .font(.system(size: 19, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
-                .foregroundColor(.yellow)
+                .foregroundColor(.white)
         }
-        .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .yellow))
+        .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .white))
         .accessibilityLabel("Map brightness and contrast controls")
         .accessibilityHint("Controls will be added in a future update")
     }

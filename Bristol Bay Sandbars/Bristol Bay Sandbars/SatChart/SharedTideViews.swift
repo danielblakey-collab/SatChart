@@ -63,13 +63,15 @@ struct HUDStationToggleButtonStyle: ButtonStyle {
     var verticalPadding: CGFloat = 2
 
     private var fillColor: Color {
-        isOn
-        ? Color(red: 0.18, green: 0.68, blue: 0.27)
-        : Color(red: 0.93, green: 0.83, blue: 0.18)
+        .black
     }
 
     private var foregroundColor: Color {
-        isOn ? .white : .black.opacity(0.88)
+        isOn ? .green : .yellow
+    }
+
+    private var borderColor: Color {
+        (isOn ? Color.green : Color.yellow).opacity(0.42)
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -81,7 +83,7 @@ struct HUDStationToggleButtonStyle: ButtonStyle {
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(Color.black.opacity(isOn ? 0.18 : 0.28), lineWidth: 0.8)
+                    .stroke(borderColor, lineWidth: 0.8)
             )
             .contentShape(Capsule())
             .opacity(configuration.isPressed ? 0.94 : 1.0)
