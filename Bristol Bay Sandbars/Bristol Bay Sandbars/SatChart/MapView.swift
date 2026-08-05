@@ -1531,67 +1531,83 @@ struct MapView: View {
         let contentWidth = max(0, availableWidth - 8)
         let showsTideColumn = showNavTideHUD || showOfflineModeInTopHUDLocation
         let controlWidth = buttonGroupWidth(count: 3, spacing: mapControlDefaultSpacing)
-        let columnGapCount: CGFloat = showsTideColumn ? 2 : 1
-        let middleWidth = max(
+        let tideSpacing: CGFloat = showsTideColumn ? 8 : 0
+        let leftWidth = max(
             0,
             contentWidth
-                - controlWidth
                 - (showsTideColumn ? tideWidth : 0)
-                - (columnGapCount * 8)
+                - tideSpacing
+        )
+        let locationWidth = min(
+            topHUDLocationFixedWidth,
+            max(220, leftWidth - controlWidth - 8)
         )
 
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 8) {
-                topHUDExpandedControlButtons
-                    .zIndex(2)
+        return HStack(alignment: .top, spacing: tideSpacing) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 8) {
+                    topHUDExpandedControlButtons
+                        .zIndex(2)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top, spacing: 6) {
-                        if showNavWindReadout {
-                            topHUDWindForecast
-                        }
-
-                        if showNavKDLGButton {
-                            topHUDKDLGButton
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-
-                        Spacer(minLength: 0)
+                    if showNavLocationReadout {
+                        topHUDCurrentLocation
+                            .frame(width: locationWidth, alignment: .leading)
                     }
 
-                    HStack(alignment: .center, spacing: 6) {
-                        if showNavBoundaryReadout {
-                            topHUDBoundaryReadout
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.65)
-                        }
-
-                        if showNavSpeedReadout {
-                            topHUDSpeedReadout
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
+                    Spacer(minLength: 0)
                 }
-                .frame(width: middleWidth, height: topHUDBoxHeight, alignment: .topLeading)
 
-                if showNavTideHUD {
-                    tideHUDBox
-                        .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topLeading)
-                } else if showOfflineModeInTopHUDLocation {
-                    offlineModeHUDPlaceholder
-                        .frame(width: tideWidth, height: topHUDBoxHeight, alignment: .topTrailing)
+                HStack(alignment: .center, spacing: 6) {
+                    if showNavKDLGButton {
+                        topHUDKDLGButton
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    if showNavWindReadout {
+                        topHUDWindForecast
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(alignment: .center, spacing: 6) {
+                    Color.clear
+                        .frame(width: controlWidth + 2, height: 1)
+                        .accessibilityHidden(true)
+
+                    if showNavSpeedReadout {
+                        topHUDSpeedReadout
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    if showNavBoundaryReadout {
+                        topHUDBoundaryReadout
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                    }
+
+                    Spacer(minLength: 0)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: topHUDBoxHeight, maxHeight: topHUDBoxHeight, alignment: .topLeading)
+            .frame(width: leftWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
 
-            if showNavLocationReadout {
-                topHUDCurrentLocation
-                    .frame(width: topHUDLocationFixedWidth, alignment: .leading)
+            if showNavTideHUD {
+                tideHUDBox(
+                    height: landscapeTopHUDBoxHeight,
+                    chartHeight: landscapeTopHUDMiniTideChartHeight
+                )
+                .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
+            } else if showOfflineModeInTopHUDLocation {
+                offlineModeHUDPlaceholder
+                    .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topTrailing)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: landscapeTopHUDBoxHeight,
+            maxHeight: landscapeTopHUDBoxHeight,
+            alignment: .topLeading
+        )
     }
 
     private var landscapeExpandedTideWidth: CGFloat {
@@ -2084,6 +2100,15 @@ struct MapView: View {
         // Keeps the tide chart, title row, and event row inside the compact 84-pt visual height.
         UIDevice.current.userInterfaceIdiom == .pad ? 32 : 31
     }
+
+    private var landscapeTopHUDBoxHeight: CGFloat {
+        104
+    }
+
+    private var landscapeTopHUDMiniTideChartHeight: CGFloat {
+        topHUDMiniTideChartHeight + (landscapeTopHUDBoxHeight - topHUDBoxHeight)
+    }
+
     private var isLandscapeMode: Bool {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
@@ -2134,6 +2159,10 @@ struct MapView: View {
     }
 
     private var tideHUDBox: some View {
+        tideHUDBox(height: topHUDBoxHeight, chartHeight: topHUDMiniTideChartHeight)
+    }
+
+    private func tideHUDBox(height: CGFloat, chartHeight: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(scSurface.opacity(0.70))
@@ -2148,13 +2177,13 @@ struct MapView: View {
                 backgroundColor: .clear,
                 borderColor: .clear,
                 progressTint: .white.opacity(0.75),
-                chartHeight: topHUDMiniTideChartHeight,
+                chartHeight: chartHeight,
                 trailingStatusText: offlineModeHUDText,
                 onTitleTap: { showTidesWeatherPage = true }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, minHeight: topHUDBoxHeight, maxHeight: topHUDBoxHeight, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .clipped()
     }
