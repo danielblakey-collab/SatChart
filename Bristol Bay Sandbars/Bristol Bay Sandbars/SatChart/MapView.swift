@@ -362,6 +362,9 @@ struct MapView: View {
     @State private var zoomOutReq: Int = 0
 
     @AppStorage("selectedMapVersion") private var selectedMapVersion: Int = 1
+    @AppStorage("selectedOnlineMapVersion") private var selectedOnlineMapVersion: Int = 4
+    @AppStorage("districtMapVisualSettingsBySlugV1") private var districtMapVisualSettingsBySlugRaw: String = "{}"
+    @AppStorage("districtMapAppearanceSelectedSlug") private var districtMapAppearanceSelectedSlug: String = ""
     @State private var isFollowing: Bool = false
 
     private let tidesWeatherService = NOAACoopsTidesWeatherService()
@@ -390,7 +393,7 @@ struct MapView: View {
     @AppStorage("radioPinDisplayName") private var radioPinDisplayName: String = ""
     @AppStorage("defaultWaypointPinColorID") private var defaultWaypointPinColorID: String = ""
     @AppStorage("liveLocationUpdateOption") private var liveLocationUpdateOptionRaw: String = LiveLocationUpdateOption.oneMinute.rawValue
-    @AppStorage("basemapChoice") private var basemapChoiceRaw: String = BasemapChoice.bristolBaySatelliteOnline.rawValue
+    @AppStorage("basemapChoice") private var basemapChoiceRaw: String = BasemapChoice.districtsOnline.rawValue
     @AppStorage("didMigrateDefaultBasemapToBristolBaySatelliteV1") private var didMigrateDefaultBasemapToBristolBaySatelliteV1: Bool = false
     @AppStorage("sstEnabled") private var sstEnabled: Bool = false
     @AppStorage("sstOpacity") private var sstOpacity: Double = 0.55
@@ -465,6 +468,59 @@ struct MapView: View {
         )
     }
 
+    private var districtMapVisualSettingsBySlug: [String: DistrictMapVisualSettings] {
+        guard let data = districtMapVisualSettingsBySlugRaw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(
+                [String: DistrictMapVisualSettings].self,
+                from: data
+              ) else {
+            return [:]
+        }
+
+        return decoded.reduce(into: [:]) { result, entry in
+            guard DistrictID.district(forDistrictMapSlug: entry.key) != nil else { return }
+            let normalizedSettings = entry.value.normalized
+            if !normalizedSettings.isNeutral {
+                result[entry.key] = normalizedSettings
+            }
+        }
+    }
+
+    private var downloadedDistrictMapPacks: [OfflinePack] {
+        DistrictID.allCases.flatMap { offline.downloadedDistrictMapPacks(for: $0) }
+    }
+
+    private func persistDistrictMapVisualSettings(
+        _ settings: DistrictMapVisualSettings,
+        forSlug slug: String
+    ) {
+        guard DistrictID.district(forDistrictMapSlug: slug) != nil else { return }
+
+        var settingsBySlug = districtMapVisualSettingsBySlug
+        let normalizedSettings = settings.normalized
+        if normalizedSettings.isNeutral {
+            settingsBySlug.removeValue(forKey: slug)
+        } else {
+            settingsBySlug[slug] = normalizedSettings
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(settingsBySlug),
+              let storageValue = String(data: data, encoding: .utf8) else {
+            return
+        }
+        districtMapVisualSettingsBySlugRaw = storageValue
+    }
+
+    private func presentDistrictMapAppearanceEditor() {
+        let downloadedPacks = downloadedDistrictMapPacks
+        if !downloadedPacks.contains(where: { $0.slug == districtMapAppearanceSelectedSlug }) {
+            districtMapAppearanceSelectedSlug = downloadedPacks.first?.slug ?? ""
+        }
+        showDistrictMapAppearanceEditor = true
+    }
+
     private var basemapChoiceBinding: Binding<BasemapChoice> {
         Binding(
             get: { basemapChoice },
@@ -476,17 +532,27 @@ struct MapView: View {
         }
 
     private var globalMapVersionCount: Int {
-        offline.maximumDownloadedDistrictMapVersionCount()
+        basemapChoice == .districtsOnline
+            ? OnlineDistrictMapCatalog.versions.count
+            : offline.maximumDownloadedDistrictMapVersionCount()
     }
 
     private var selectedMapCycleVersion: Int {
-        max(1, min(selectedMapVersion, globalMapVersionCount))
+        basemapChoice == .districtsOnline
+            ? OnlineDistrictMapCatalog.normalizedVersion(selectedOnlineMapVersion)
+            : max(1, min(selectedMapVersion, globalMapVersionCount))
     }
 
     private var selectedMapVersionBinding: Binding<Int> {
         Binding(
             get: { selectedMapCycleVersion },
-            set: { selectedMapVersion = max(1, $0) }
+            set: {
+                if basemapChoice == .districtsOnline {
+                    selectedOnlineMapVersion = OnlineDistrictMapCatalog.normalizedVersion($0)
+                } else {
+                    selectedMapVersion = max(1, $0)
+                }
+            }
         )
     }
 
@@ -494,7 +560,11 @@ struct MapView: View {
         "Map v\(selectedMapCycleVersion)"
     }
 
-    private func cycleToNextDownloadedMapVersion() {
+    private func cycleToNextMapVersion() {
+        if basemapChoice == .districtsOnline {
+            selectedOnlineMapVersion = OnlineDistrictMapCatalog.nextVersion(after: selectedMapCycleVersion)
+            return
+        }
         let maxVersion = globalMapVersionCount
         selectedMapVersion = selectedMapCycleVersion >= maxVersion ? 1 : selectedMapCycleVersion + 1
     }
@@ -514,6 +584,7 @@ struct MapView: View {
     // Menu sheet
     @State private var showMenu: Bool = false
     @State private var showSSTControls: Bool = false
+    @State private var showDistrictMapAppearanceEditor: Bool = false
 
     // Waypoint prompt
     @State private var showCreateWaypointPrompt: Bool = false
@@ -1069,7 +1140,7 @@ struct MapView: View {
 
     private func migrateDefaultBasemapIfNeeded() {
         guard shouldPreferBristolBaySatelliteDefault else { return }
-        basemapChoiceRaw = BasemapChoice.bristolBaySatelliteOnline.rawValue
+        basemapChoiceRaw = BasemapChoice.districtsOnline.rawValue
         didMigrateDefaultBasemapToBristolBaySatelliteV1 = true
     }
 
@@ -1118,6 +1189,8 @@ struct MapView: View {
             zoomInRequest: $zoomInReq,
             zoomOutRequest: $zoomOutReq,
             basemapChoice: basemapChoice,
+            offlineInventoryRevision: offline.downloadedTick,
+            districtMapVisualSettingsBySlug: districtMapVisualSettingsBySlug,
             sstEnabled: sstEnabled,
             sstOpacity: sstOpacity,
             sstSource: sstSource,
@@ -1127,7 +1200,6 @@ struct MapView: View {
             visibleFishingSets: smartLogbookStore.displayedFishingSetsOnNavPage.filter { $0.displayOnNavPage },
             onFishingSetDisplayPrompt: { _ in }
         )
-        .id("map-\(offline.downloadedTick)")
         .ignoresSafeArea()
         .onAppear(perform: handleMapAppear)
     }
@@ -1660,7 +1732,7 @@ struct MapView: View {
         HStack(spacing: mapControlDefaultSpacing) {
             topHUDExpandCollapseButton
             fishTicketOCRButton
-            mapAppearancePlaceholderButton
+            mapAppearanceButton
 
             if showNavKDLGButton {
                 topHUDKDLGMapButton
@@ -1983,7 +2055,7 @@ struct MapView: View {
         HStack(spacing: mapControlDefaultSpacing) {
             topHUDExpandCollapseButton
             fishTicketOCRButton
-            mapAppearancePlaceholderButton
+            mapAppearanceButton
         }
         .fixedSize(horizontal: true, vertical: true)
     }
@@ -2028,16 +2100,22 @@ struct MapView: View {
         .accessibilityLabel("Open fish ticket OCR")
     }
 
-    private var mapAppearancePlaceholderButton: some View {
-        Button {} label: {
+    private var mapAppearanceButton: some View {
+        Button(action: presentDistrictMapAppearanceEditor) {
             Image(systemName: "sun.max.fill")
                 .font(.system(size: 19, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
                 .foregroundColor(.white)
         }
-        .buttonStyle(MapIconButtonStyle(isActive: false, foreground: .white))
-        .accessibilityLabel("Map brightness and contrast controls")
-        .accessibilityHint("Controls will be added in a future update")
+        .buttonStyle(
+            MapIconButtonStyle(
+                isActive: districtMapVisualSettingsBySlug.values.contains { !$0.isNeutral },
+                foreground: .white
+            )
+        )
+        .accessibilityLabel("District map appearance")
+        .accessibilityValue(districtMapVisualSettingsBySlug.isEmpty ? "Original colors" : "Custom settings applied")
+        .accessibilityHint("Opens brightness, contrast, gamma, and saturation controls")
     }
 
     private func activeRecordSetButtonLabel(session: ActiveFishingSetSession, now: Date) -> some View {
@@ -2789,7 +2867,7 @@ struct MapView: View {
 
     private func mapVersionCycleButton(width: CGFloat) -> some View {
         Button {
-            cycleToNextDownloadedMapVersion()
+            cycleToNextMapVersion()
         } label: {
             Text(mapVersionButtonLabel)
                 .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -2808,8 +2886,10 @@ struct MapView: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .opacity(globalMapVersionCount > 1 ? 1.0 : 0.72)
-        .accessibilityLabel("Cycle downloaded map version")
-        .accessibilityValue("Map version \(selectedMapCycleVersion) of \(globalMapVersionCount)")
+        .accessibilityLabel(basemapChoice == .districtsOnline ? "Cycle online district map version" : "Cycle downloaded map version")
+        .accessibilityValue(basemapChoice == .districtsOnline
+            ? "Map version \(selectedMapCycleVersion), \(globalMapVersionCount) online versions available"
+            : "Map version \(selectedMapCycleVersion) of \(globalMapVersionCount)")
     }
 
     private var bottomMainButtons: some View {
@@ -3128,7 +3208,7 @@ struct MapView: View {
             Image(systemName: "globe.americas.fill")
                 .font(.system(size: size, weight: .semibold))
 
-        case .bristolBaySatelliteOnline:
+        case .districtsOnline:
             ZStack {
                 Image(systemName: "globe.americas.fill")
                     .font(.system(size: size + 1, weight: .semibold))
@@ -3342,6 +3422,24 @@ struct MapView: View {
             }
             .sheet(isPresented: $showSSTControls) {
                 sstControlsSheet
+            }
+            .sheet(isPresented: $showDistrictMapAppearanceEditor) {
+                DistrictMapAppearanceEditorView(
+                    downloadedPacks: downloadedDistrictMapPacks,
+                    appliedSettingsBySlug: districtMapVisualSettingsBySlug,
+                    initialSelectedSlug: districtMapAppearanceSelectedSlug,
+                    onSelectionChange: { slug in
+                        districtMapAppearanceSelectedSlug = slug
+                    },
+                    onRestore: { slug in
+                        persistDistrictMapVisualSettings(.neutral, forSlug: slug)
+                    },
+                    onApply: { slug, settings in
+                        persistDistrictMapVisualSettings(settings, forSlug: slug)
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .onChange(of: sstSourceRaw) { _ in
                 refreshSSTAvailability(for: sstSource)
@@ -5030,7 +5128,7 @@ private struct HowToUseSatChartPageView: View {
         HowToUseNavigationButton(title: "Record Set", detail: "Starts a fishing set timer. Tap again when the set is complete to save set details to the Logbook.", preview: .recordSet),
         HowToUseNavigationButton(title: "Fish Ticket OCR", detail: "Opens the camera flow for fish ticket capture. Ticket photos and extracted fields stay on the device unless you export or share them.", preview: .symbol("camera.fill", Color(uiColor: UIColor(red: 0.95, green: 0.78, blue: 0.18, alpha: 1.0)))),
         HowToUseNavigationButton(title: "Create Waypoint", detail: "Drops a waypoint at the map cursor/current target. Waypoints can be renamed, exported, or shared to a Radio Group.", preview: .waypoint),
-        HowToUseNavigationButton(title: "Map Version", detail: "Appears after downloading district map versions. Tap Map v# to cycle through downloaded versions for comparison.", preview: .text("Map v2"))
+        HowToUseNavigationButton(title: "Map Version", detail: "Tap Map v# to compare available versions in Districts Online or downloaded versions in Districts Offline.", preview: .text("Map v2"))
     ]
 
     var body: some View {
@@ -5059,7 +5157,7 @@ private struct HowToUseSatChartPageView: View {
                     "Open Menu > Download Offline Maps while you have a reliable connection.",
                     "Download the district map packs you expect to need before leaving service.",
                     "Use the basemap button on the navigation screen to switch to downloaded/offline layers.",
-                    "If more than one downloaded district map version is available, the Map v# button appears on the navigation screen. Tap it to cycle versions.",
+                    "Tap Map v# to cycle published versions in Districts Online without downloading. In Districts Offline, it cycles your downloaded versions.",
                     "Offline maps are planning and situational-awareness layers. Verify navigation decisions with official charts and onboard equipment."
                 ])
             }
@@ -6211,7 +6309,7 @@ struct SettingsScreenLayoutOptionsPageView: View {
                 settingsToggle(title: "Create Waypoint Button", subtitle: "Shows the create waypoint button.", isOn: $showNavCreateWaypointButton)
                 settingsToggle(title: "Zoom In Button", subtitle: "Shows the map zoom-in button.", isOn: $showNavZoomInButton)
                 settingsToggle(title: "Zoom Out Button", subtitle: "Shows the map zoom-out button.", isOn: $showNavZoomOutButton)
-                settingsToggle(title: "Map Version Selector", subtitle: "Shows the Map v# button that cycles downloaded district map versions.", isOn: $showNavMapSelector)
+                settingsToggle(title: "Map Version Selector", subtitle: "Shows the Map v# button for online and downloaded district map versions.", isOn: $showNavMapSelector)
             }
         }
     }

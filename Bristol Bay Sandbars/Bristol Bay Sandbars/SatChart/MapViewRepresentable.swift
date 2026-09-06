@@ -3,6 +3,322 @@ import MapKit
 import CoreLocation
 import UIKit
 import Foundation
+import os
+
+// MARK: - Map rendering stability primitives
+
+nonisolated struct MapStabilityDiagnosticSnapshot: Sendable, Equatable {
+    let updateUIViewCount: UInt64
+    let deferredUpdateUIViewCount: UInt64
+    let visibleRegionCount: UInt64
+    let movementIntervalCount: UInt64
+    let settledUpdateCount: UInt64
+    let reconciliationCount: UInt64
+    let overlayAdditions: UInt64
+    let overlayRemovals: UInt64
+    let overlayReorders: UInt64
+    let rendererCreations: UInt64
+    let reloadDataCalls: UInt64
+    let alphaAttempts: UInt64
+    let alphaWrites: UInt64
+    let programmaticCameraApplies: UInt64
+    let programmaticCameraSkips: UInt64
+    let mainThreadViolations: UInt64
+    let updateUIViewTotalNanoseconds: UInt64
+    let updateUIViewMaximumNanoseconds: UInt64
+    let visibleRegionTotalNanoseconds: UInt64
+    let visibleRegionMaximumNanoseconds: UInt64
+    let movementIntervalTotalNanoseconds: UInt64
+    let movementIntervalMaximumNanoseconds: UInt64
+    let settledUpdateTotalNanoseconds: UInt64
+    let settledUpdateMaximumNanoseconds: UInt64
+    let reconciliationTotalNanoseconds: UInt64
+    let reconciliationMaximumNanoseconds: UInt64
+
+    var compactDescription: String {
+        "updates=\(updateUIViewCount) deferred=\(deferredUpdateUIViewCount) visible=\(visibleRegionCount) movements=\(movementIntervalCount) settled=\(settledUpdateCount) reconcile=\(reconciliationCount) overlays=+\(overlayAdditions)/-\(overlayRemovals)/r\(overlayReorders) renderers=\(rendererCreations) reloads=\(reloadDataCalls) alpha=\(alphaWrites)/\(alphaAttempts) camera=\(programmaticCameraApplies)/\(programmaticCameraSkips) mainViolations=\(mainThreadViolations) maxUs(update/visible/movement/settled/reconcile)=\(updateUIViewMaximumNanoseconds / 1_000)/\(visibleRegionMaximumNanoseconds / 1_000)/\(movementIntervalMaximumNanoseconds / 1_000)/\(settledUpdateMaximumNanoseconds / 1_000)/\(reconciliationMaximumNanoseconds / 1_000)"
+    }
+}
+
+/// Aggregate-only diagnostics for the MapKit bridge. No coordinates, vessel data,
+/// waypoint data, or radio-group identifiers are recorded.
+nonisolated final class MapStabilityDiagnostics: @unchecked Sendable {
+    static let shared = MapStabilityDiagnostics()
+
+    enum Timing { case updateUIView, visibleRegion, movementInterval, settledUpdate, reconciliation }
+    enum Counter {
+        case deferredUpdateUIView, overlayAddition, overlayRemoval, overlayReorder
+        case rendererCreation, reloadData, alphaAttempt, alphaWrite
+        case programmaticCameraApply, programmaticCameraSkip, mainThreadViolation
+    }
+
+    private let lock = NSLock()
+    private var updateUIViewCount: UInt64 = 0
+    private var deferredUpdateUIViewCount: UInt64 = 0
+    private var visibleRegionCount: UInt64 = 0
+    private var movementIntervalCount: UInt64 = 0
+    private var settledUpdateCount: UInt64 = 0
+    private var reconciliationCount: UInt64 = 0
+    private var overlayAdditions: UInt64 = 0
+    private var overlayRemovals: UInt64 = 0
+    private var overlayReorders: UInt64 = 0
+    private var rendererCreations: UInt64 = 0
+    private var reloadDataCalls: UInt64 = 0
+    private var alphaAttempts: UInt64 = 0
+    private var alphaWrites: UInt64 = 0
+    private var programmaticCameraApplies: UInt64 = 0
+    private var programmaticCameraSkips: UInt64 = 0
+    private var mainThreadViolations: UInt64 = 0
+    private var updateUIViewTotalNanoseconds: UInt64 = 0
+    private var updateUIViewMaximumNanoseconds: UInt64 = 0
+    private var visibleRegionTotalNanoseconds: UInt64 = 0
+    private var visibleRegionMaximumNanoseconds: UInt64 = 0
+    private var movementIntervalTotalNanoseconds: UInt64 = 0
+    private var movementIntervalMaximumNanoseconds: UInt64 = 0
+    private var settledUpdateTotalNanoseconds: UInt64 = 0
+    private var settledUpdateMaximumNanoseconds: UInt64 = 0
+    private var reconciliationTotalNanoseconds: UInt64 = 0
+    private var reconciliationMaximumNanoseconds: UInt64 = 0
+
+    func record(_ timing: Timing, nanoseconds: UInt64) {
+        #if DEBUG
+        lock.lock()
+        switch timing {
+        case .updateUIView:
+            updateUIViewCount &+= 1
+            updateUIViewTotalNanoseconds &+= nanoseconds
+            updateUIViewMaximumNanoseconds = max(updateUIViewMaximumNanoseconds, nanoseconds)
+        case .visibleRegion:
+            visibleRegionCount &+= 1
+            visibleRegionTotalNanoseconds &+= nanoseconds
+            visibleRegionMaximumNanoseconds = max(visibleRegionMaximumNanoseconds, nanoseconds)
+        case .movementInterval:
+            movementIntervalCount &+= 1
+            movementIntervalTotalNanoseconds &+= nanoseconds
+            movementIntervalMaximumNanoseconds = max(movementIntervalMaximumNanoseconds, nanoseconds)
+        case .settledUpdate:
+            settledUpdateCount &+= 1
+            settledUpdateTotalNanoseconds &+= nanoseconds
+            settledUpdateMaximumNanoseconds = max(settledUpdateMaximumNanoseconds, nanoseconds)
+        case .reconciliation:
+            reconciliationCount &+= 1
+            reconciliationTotalNanoseconds &+= nanoseconds
+            reconciliationMaximumNanoseconds = max(reconciliationMaximumNanoseconds, nanoseconds)
+        }
+        lock.unlock()
+        #endif
+    }
+
+    func increment(_ counter: Counter) {
+        #if DEBUG
+        lock.lock()
+        switch counter {
+        case .deferredUpdateUIView: deferredUpdateUIViewCount &+= 1
+        case .overlayAddition: overlayAdditions &+= 1
+        case .overlayRemoval: overlayRemovals &+= 1
+        case .overlayReorder: overlayReorders &+= 1
+        case .rendererCreation: rendererCreations &+= 1
+        case .reloadData: reloadDataCalls &+= 1
+        case .alphaAttempt: alphaAttempts &+= 1
+        case .alphaWrite: alphaWrites &+= 1
+        case .programmaticCameraApply: programmaticCameraApplies &+= 1
+        case .programmaticCameraSkip: programmaticCameraSkips &+= 1
+        case .mainThreadViolation: mainThreadViolations &+= 1
+        }
+        lock.unlock()
+        #endif
+    }
+
+    func snapshot() -> MapStabilityDiagnosticSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return MapStabilityDiagnosticSnapshot(
+            updateUIViewCount: updateUIViewCount,
+            deferredUpdateUIViewCount: deferredUpdateUIViewCount,
+            visibleRegionCount: visibleRegionCount,
+            movementIntervalCount: movementIntervalCount,
+            settledUpdateCount: settledUpdateCount,
+            reconciliationCount: reconciliationCount,
+            overlayAdditions: overlayAdditions,
+            overlayRemovals: overlayRemovals,
+            overlayReorders: overlayReorders,
+            rendererCreations: rendererCreations,
+            reloadDataCalls: reloadDataCalls,
+            alphaAttempts: alphaAttempts,
+            alphaWrites: alphaWrites,
+            programmaticCameraApplies: programmaticCameraApplies,
+            programmaticCameraSkips: programmaticCameraSkips,
+            mainThreadViolations: mainThreadViolations,
+            updateUIViewTotalNanoseconds: updateUIViewTotalNanoseconds,
+            updateUIViewMaximumNanoseconds: updateUIViewMaximumNanoseconds,
+            visibleRegionTotalNanoseconds: visibleRegionTotalNanoseconds,
+            visibleRegionMaximumNanoseconds: visibleRegionMaximumNanoseconds,
+            movementIntervalTotalNanoseconds: movementIntervalTotalNanoseconds,
+            movementIntervalMaximumNanoseconds: movementIntervalMaximumNanoseconds,
+            settledUpdateTotalNanoseconds: settledUpdateTotalNanoseconds,
+            settledUpdateMaximumNanoseconds: settledUpdateMaximumNanoseconds,
+            reconciliationTotalNanoseconds: reconciliationTotalNanoseconds,
+            reconciliationMaximumNanoseconds: reconciliationMaximumNanoseconds
+        )
+    }
+
+    #if DEBUG
+    func logSnapshot() {
+        os_log(.info, log: Self.log, "%{public}@", snapshot().compactDescription)
+    }
+
+    private static let log = OSLog(
+        subsystem: "com.curraghfisheries.SatChart",
+        category: "MapStability"
+    )
+    #endif
+}
+
+@MainActor protocol MapRendererOpacityTarget: AnyObject {
+    var mapRendererAlpha: CGFloat { get set }
+}
+
+extension MKOverlayRenderer: MapRendererOpacityTarget {
+    var mapRendererAlpha: CGFloat {
+        get { alpha }
+        set { alpha = newValue }
+    }
+}
+
+@MainActor final class MapRendererOpacityController {
+    /// MapKit opacity is perceptually unchanged below one thousandth, while
+    /// avoiding redundant floating-point writes implicated in iOS 18 tile stalls.
+    static let epsilon: CGFloat = 0.001
+
+    struct Snapshot: Equatable {
+        let attempts: UInt64
+        let writes: UInt64
+        let trackedRenderers: Int
+    }
+
+    private var lastAppliedByRenderer: [ObjectIdentifier: CGFloat] = [:]
+    private(set) var attempts: UInt64 = 0
+    private(set) var writes: UInt64 = 0
+
+    @discardableResult
+    func apply(_ requestedOpacity: CGFloat, to renderer: MapRendererOpacityTarget) -> Bool {
+        attempts &+= 1
+        MapStabilityDiagnostics.shared.increment(.alphaAttempt)
+        let opacity = Self.normalized(requestedOpacity)
+        let id = ObjectIdentifier(renderer)
+        let previous = lastAppliedByRenderer[id] ?? Self.normalized(renderer.mapRendererAlpha)
+        guard abs(previous - opacity) > Self.epsilon else {
+            lastAppliedByRenderer[id] = previous
+            return false
+        }
+        renderer.mapRendererAlpha = opacity
+        lastAppliedByRenderer[id] = opacity
+        writes &+= 1
+        MapStabilityDiagnostics.shared.increment(.alphaWrite)
+        return true
+    }
+
+    func retire(_ renderer: MapRendererOpacityTarget) {
+        lastAppliedByRenderer.removeValue(forKey: ObjectIdentifier(renderer))
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(attempts: attempts, writes: writes, trackedRenderers: lastAppliedByRenderer.count)
+    }
+
+    static func normalized(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 1 }
+        return min(1, max(0, value))
+    }
+}
+
+nonisolated struct MapCameraState: Equatable, Sendable {
+    static let centerToleranceMeters = 0.75
+    static let zoomTolerance = 0.002
+    static let angleTolerance = 0.1
+
+    let latitude: Double
+    let longitude: Double
+    let zoom: Double
+    let heading: Double
+    let pitch: Double
+
+    func isEffectivelyEqual(to other: MapCameraState) -> Bool {
+        guard latitude.isFinite, longitude.isFinite, zoom.isFinite, heading.isFinite, pitch.isFinite,
+              other.latitude.isFinite, other.longitude.isFinite, other.zoom.isFinite,
+              other.heading.isFinite, other.pitch.isFinite else { return false }
+        let meanLatitudeRadians = ((latitude + other.latitude) * 0.5) * .pi / 180
+        let latitudeMeters = abs(latitude - other.latitude) * 111_320
+        let longitudeMeters = abs(longitude - other.longitude) * 111_320 * max(0.01, abs(cos(meanLatitudeRadians)))
+        return hypot(latitudeMeters, longitudeMeters) <= Self.centerToleranceMeters
+            && abs(zoom - other.zoom) <= Self.zoomTolerance
+            && Self.angularDistance(heading, other.heading) <= Self.angleTolerance
+            && abs(pitch - other.pitch) <= Self.angleTolerance
+    }
+
+    private static func angularDistance(_ lhs: Double, _ rhs: Double) -> Double {
+        let delta = abs(lhs - rhs).truncatingRemainder(dividingBy: 360)
+        return min(delta, 360 - delta)
+    }
+}
+
+nonisolated struct MapCameraFeedbackGuard {
+    private(set) var lastMapKitEmission: MapCameraState?
+    private(set) var lastProgrammaticRequest: MapCameraState?
+
+    mutating func shouldApplyProgrammaticRequest(
+        _ requested: MapCameraState,
+        current: MapCameraState
+    ) -> Bool {
+        if requested.isEffectivelyEqual(to: current)
+            || lastProgrammaticRequest?.isEffectivelyEqual(to: requested) == true {
+            return false
+        }
+        lastProgrammaticRequest = requested
+        return true
+    }
+
+    /// Returns true only when a camera binding would need publication.
+    mutating func recordMapKitEmission(_ emitted: MapCameraState) -> Bool {
+        if let request = lastProgrammaticRequest,
+           !request.isEffectivelyEqual(to: emitted) {
+            lastProgrammaticRequest = nil
+        }
+        guard lastMapKitEmission?.isEffectivelyEqual(to: emitted) != true else { return false }
+        lastMapKitEmission = emitted
+        return true
+    }
+}
+
+nonisolated struct MapSettledUpdateGate {
+    private(set) var generation: UInt64 = 0
+    private(set) var isMoving = false
+    private var lastSettledGeneration: UInt64?
+
+    @discardableResult
+    mutating func beginMovement() -> UInt64 {
+        if !isMoving {
+            generation &+= 1
+            isMoving = true
+        }
+        return generation
+    }
+
+    mutating func noteContinuousMovement() {
+        _ = beginMovement()
+    }
+
+    mutating func consumeSettledGeneration() -> UInt64? {
+        isMoving = false
+        guard lastSettledGeneration != generation else { return nil }
+        lastSettledGeneration = generation
+        return generation
+    }
+
+    func isCurrent(_ candidate: UInt64) -> Bool {
+        candidate == generation
+    }
+}
 
 // MARK: - Waypoints model (FILE SCOPE so other views can use it)
 
@@ -168,6 +484,8 @@ struct MapViewRepresentable: UIViewRepresentable {
     @Binding var zoomOutRequest: Int
 
     let basemapChoice: BasemapChoice
+    let offlineInventoryRevision: Int
+    let districtMapVisualSettingsBySlug: [String: DistrictMapVisualSettings]
     let sstEnabled: Bool
     let sstOpacity: Double
     let sstSource: SeaSurfaceTemperatureSource
@@ -199,6 +517,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         zoomInRequest: Binding<Int>,
         zoomOutRequest: Binding<Int>,
         basemapChoice: BasemapChoice,
+        offlineInventoryRevision: Int,
+        districtMapVisualSettingsBySlug: [String: DistrictMapVisualSettings],
         sstEnabled: Bool,
         sstOpacity: Double,
         sstSource: SeaSurfaceTemperatureSource,
@@ -229,6 +549,10 @@ struct MapViewRepresentable: UIViewRepresentable {
             self._zoomInRequest = zoomInRequest
             self._zoomOutRequest = zoomOutRequest
             self.basemapChoice = basemapChoice
+            self.offlineInventoryRevision = offlineInventoryRevision
+            self.districtMapVisualSettingsBySlug = districtMapVisualSettingsBySlug.mapValues {
+                $0.normalized
+            }
             self.sstEnabled = sstEnabled
             self.sstOpacity = sstOpacity
             self.sstSource = sstSource
@@ -243,21 +567,31 @@ struct MapViewRepresentable: UIViewRepresentable {
     private let minZForTiles: Int = 4
     private let maxZ: Double = 15
     private let maxZForTiles: Int = 15
+    private let extendedOfflineMaxZ: Double = 17
+    private let extendedOfflineMaxZForTiles: Int = 17
     private let initialLaunchZoom: Double = 12.0
 
-    // District map packs and shorelines that are available or discoverable locally.
-    private var availablePacks: [OfflinePack] {
-        OfflineMapsManager.shared.localOverlayCandidatePacks()
+    static func desiredDistrictMapSlugs(
+        from packs: [OfflinePack]
+    ) -> [DistrictID: String] {
+        Dictionary(
+            uniqueKeysWithValues: packs.compactMap { pack in
+                guard pack.isDistrictMapPack else { return nil }
+                return (pack.district, pack.slug)
+            }
+        )
     }
 
     func makeCoordinator() -> Coordinator {
         let followBinding = $isFollowingUser
         let cursorTrackingBinding = $isCursorTrackingUser
 
-        return Coordinator(
+        let coordinator = Coordinator(
             minZForTiles: minZForTiles,
             maxZ: maxZ,
             maxZForTiles: maxZForTiles,
+            extendedOfflineMaxZ: extendedOfflineMaxZ,
+            extendedOfflineMaxZForTiles: extendedOfflineMaxZForTiles,
             initialLaunchZoom: initialLaunchZoom,
             initialCursorTrackingUser: isCursorTrackingUser,
             onDistanceText: { distanceText = $0 },
@@ -282,6 +616,15 @@ struct MapViewRepresentable: UIViewRepresentable {
                 onFishingSetDisplayPrompt(setID)
             }
         )
+        coordinator.currentDistrictMapVisualSettingsBySlug = districtMapVisualSettingsBySlug.mapValues {
+            $0.normalized
+        }
+        // Request counters live in the parent SwiftUI view. A newly created map
+        // coordinator must start at the current values or it will replay every zoom
+        // tap from the prior MKMapView lifecycle.
+        coordinator.lastZoomInReq = zoomInRequest
+        coordinator.lastZoomOutReq = zoomOutRequest
+        return coordinator
     }
 
     func makeUIView(context: Context) -> MKMapView {
@@ -299,9 +642,6 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // North-up lock
         map.isRotateEnabled = false
-        let cam = map.camera
-        cam.heading = 0
-        map.camera = cam
 
         // Custom follow
         map.userTrackingMode = .none
@@ -314,7 +654,10 @@ struct MapViewRepresentable: UIViewRepresentable {
         installOrRefreshAllMBTilesOverlays(on: map, coordinator: context.coordinator)
         context.coordinator.syncBasemap(on: map)
         context.coordinator.clampZoomIfNeeded(map)
+        context.coordinator.updateMBTilesViewportHints(map)
         syncSSTOverlay(on: map, coordinator: context.coordinator)
+        context.coordinator.lastOfflineInventoryRevision = offlineInventoryRevision
+        context.coordinator.hasSynchronizedSwiftUIMapPresentation = true
         // Seed scale
         context.coordinator.updateScale(map)
 
@@ -351,27 +694,101 @@ struct MapViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        // keep tiles sticky after downloads/deletes
-        installOrRefreshAllMBTilesOverlays(on: map, coordinator: context.coordinator)
+        #if DEBUG
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        defer {
+            MapStabilityDiagnostics.shared.record(
+                .updateUIView,
+                nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt
+            )
+        }
+        #endif
+        #if DEBUG
+        if !Thread.isMainThread {
+            MapStabilityDiagnostics.shared.increment(.mainThreadViolation)
+        }
+        #endif
+
+        let coordinator = context.coordinator
+        if coordinator.isCameraMovementActive {
+            MapStabilityDiagnostics.shared.increment(.deferredUpdateUIView)
+            coordinator.deferSwiftUIUpdate { [weak map, weak coordinator] in
+                guard let map, let coordinator, coordinator.mapView === map else { return }
+                self.applyUpdateUIView(to: map, coordinator: coordinator)
+            }
+            return
+        }
+
+        applyUpdateUIView(to: map, coordinator: coordinator)
+    }
+
+    private func applyUpdateUIView(to map: MKMapView, coordinator: Coordinator) {
+        // Preserve the existing implementation's `context.coordinator` spelling
+        // while allowing the latest SwiftUI value snapshot to be deferred as one
+        // replaceable closure during continuous camera movement.
+        struct CoordinatorProxy {
+            let coordinator: Coordinator
+        }
+        let context = CoordinatorProxy(coordinator: coordinator)
+        let districtAppearanceChanged = context.coordinator.applyDistrictMapVisualSettings(
+            districtMapVisualSettingsBySlug,
+            on: map
+        )
+
         let previousBasemapChoice = context.coordinator.basemapChoice
         context.coordinator.basemapChoice = basemapChoice
-        context.coordinator.syncBasemap(on: map)
-        context.coordinator.clampZoomIfNeeded(map)
-        syncSSTOverlay(on: map, coordinator: context.coordinator)
         let basemapChoiceChanged = previousBasemapChoice != basemapChoice
+
+        let selectedMapVersionChanged = context.coordinator.lastSelectedMapVersion
+            != selectedMapVersion
+        if selectedMapVersionChanged {
+            context.coordinator.lastSelectedMapVersion = selectedMapVersion
+            context.coordinator.currentSelectedMapVersion = selectedMapVersion
+        }
+
+        let offlineInventoryChanged = context.coordinator.lastOfflineInventoryRevision
+            != offlineInventoryRevision
+        if offlineInventoryChanged {
+            context.coordinator.lastOfflineInventoryRevision = offlineInventoryRevision
+        }
+
+        let offlinePresentationChanged = districtAppearanceChanged
+            || basemapChoiceChanged
+            || selectedMapVersionChanged
+            || offlineInventoryChanged
+            || !context.coordinator.hasSynchronizedSwiftUIMapPresentation
+        if offlinePresentationChanged {
+            // Keep only the selected version for each district installed, and only
+            // while the district basemap is active. Unrelated SwiftUI updates never
+            // recalculate the catalog or reconcile these overlays.
+            installOrRefreshAllMBTilesOverlays(on: map, coordinator: context.coordinator)
+            context.coordinator.syncBasemap(on: map)
+            context.coordinator.clampZoomIfNeeded(map)
+            context.coordinator.updateMBTilesViewportHints(map)
+            context.coordinator.hasSynchronizedSwiftUIMapPresentation = true
+        }
+
+        let wantedSSTKey = sstEnabled ? "\(sstSource.rawValue)|\(sstDateUTC)" : nil
+        let normalizedSSTOpacity = max(0.0, min(1.0, sstOpacity.isFinite ? sstOpacity : 1.0))
+        let sstPresentationChanged = context.coordinator.sstOverlayKey != wantedSSTKey
+            || abs(context.coordinator.currentSSTOpacity - normalizedSSTOpacity)
+                > Double(MapRendererOpacityController.epsilon)
+            || (wantedSSTKey != nil && context.coordinator.sstOverlay == nil)
+        if sstPresentationChanged {
+            syncSSTOverlay(on: map, coordinator: context.coordinator)
+        }
 
         // Keep gesture hooks attached in case MapKit adds recognizers after view creation.
         // Only re-run occasionally to avoid spamming logs.
-        if context.coordinator.lastGestureHookRefresh != followUserRequest + recenterRequest + zoomInRequest + zoomOutRequest {
-            context.coordinator.lastGestureHookRefresh = followUserRequest + recenterRequest + zoomInRequest + zoomOutRequest
+        let gestureHookRefreshRequest = followUserRequest + recenterRequest
+        if context.coordinator.lastGestureHookRefresh != gestureHookRefreshRequest {
+            context.coordinator.lastGestureHookRefresh = gestureHookRefreshRequest
             context.coordinator.installGestureHooksIfNeeded(map)
         }
 
 
         // map-version change
-        if basemapChoiceChanged || context.coordinator.lastSelectedMapVersion != selectedMapVersion {
-            context.coordinator.lastSelectedMapVersion = selectedMapVersion
-            context.coordinator.currentSelectedMapVersion = selectedMapVersion
+        if basemapChoiceChanged || selectedMapVersionChanged {
             context.coordinator.applySelectedMapVersion(on: map, selectedMapVersion: selectedMapVersion)
         }
 
@@ -401,20 +818,20 @@ struct MapViewRepresentable: UIViewRepresentable {
             // User-entered cursor coordinate implies manual cursor mode.
             context.coordinator.cursorFollowsUser = false
 
-            context.coordinator.uiLog("CursorPan -> setCenter(animated: true) to \(c.latitude), \(c.longitude)")
-            context.coordinator.withProgrammaticRegionChange(timeout: 1.2) {
-                map.setCenter(c, animated: true)
-            }
+            context.coordinator.uiLog("CursorPan -> apply programmatic center")
+            context.coordinator.setCenterIfNeeded(c, on: map, animated: true, timeout: 1.2)
         }
 
-        // Zoom button requests
-        if context.coordinator.lastZoomInReq != zoomInRequest {
-            context.coordinator.lastZoomInReq = zoomInRequest
-            context.coordinator.zoom(map, delta: +1)
-        }
-        if context.coordinator.lastZoomOutReq != zoomOutRequest {
-            context.coordinator.lastZoomOutReq = zoomOutRequest
-            context.coordinator.zoom(map, delta: -1)
+        // Zoom button requests. SwiftUI updates are deliberately coalesced while
+        // MapKit is animating, so consume the full counter delta rather than turning
+        // a burst of taps into a single level or two competing animations.
+        let zoomInDelta = max(0, zoomInRequest - context.coordinator.lastZoomInReq)
+        let zoomOutDelta = max(0, zoomOutRequest - context.coordinator.lastZoomOutReq)
+        context.coordinator.lastZoomInReq = zoomInRequest
+        context.coordinator.lastZoomOutReq = zoomOutRequest
+        let netZoomDelta = zoomInDelta - zoomOutDelta
+        if netZoomDelta != 0 {
+            context.coordinator.zoom(map, delta: netZoomDelta)
         }
 
         // Follow button requests (toggle)
@@ -447,9 +864,7 @@ struct MapViewRepresentable: UIViewRepresentable {
             // When Follow is toggled, optionally center once (only when turning ON)
             if let loc = map.userLocation.location?.coordinate, context.coordinator.isFollowingUser {
                 context.coordinator.uiLog("FollowButton centerOnce -> setCenter(animated: true)")
-                context.coordinator.withProgrammaticRegionChange(timeout: 1.2) {
-                    map.setCenter(loc, animated: true)
-                }
+                context.coordinator.setCenterIfNeeded(loc, on: map, animated: true, timeout: 1.2)
             } else {
                 context.coordinator.uiLog("FollowButton centerOnce -> skipped (no loc or follow OFF)")
             }
@@ -483,13 +898,16 @@ struct MapViewRepresentable: UIViewRepresentable {
 
             context.coordinator.uiLog("RecenterButton -> setCenter(animated: true)")
             // One-shot center only
-            context.coordinator.withProgrammaticRegionChange(timeout: 1.2) {
-                map.setCenter(loc, animated: true)
-            }
+            context.coordinator.setCenterIfNeeded(loc, on: map, animated: true, timeout: 1.2)
 
             // Optional: re-pin cursor on recenter
             context.coordinator.snapCursorToUser(on: map)
         }
+    }
+
+    static func dismantleUIView(_ uiView: MKMapView, coordinator: Coordinator) {
+        coordinator.prepareForDismantle()
+        uiView.delegate = nil
     }
 
     // MARK: - Boundaries
@@ -505,88 +923,285 @@ struct MapViewRepresentable: UIViewRepresentable {
             return
         }
 
-        do {
-            let data = try Data(contentsOf: boundariesURL)
-            let objects = try MKGeoJSONDecoder().decode(data)
-
-            var polylines: [MKPolyline] = []
-
-            for obj in objects {
-                guard let feature = obj as? MKGeoJSONFeature else { continue }
-                for geom in feature.geometry {
-                    if let l = geom as? MKPolyline { polylines.append(l) }
-                    else if let ml = geom as? MKMultiPolyline { polylines.append(contentsOf: ml.polylines) }
+        DispatchQueue.global(qos: .utility).async { [weak map, weak coordinator] in
+            do {
+                let data = try Data(contentsOf: boundariesURL)
+                let objects = try MKGeoJSONDecoder().decode(data)
+                var polylines: [MKPolyline] = []
+                for obj in objects {
+                    guard let feature = obj as? MKGeoJSONFeature else { continue }
+                    for geometry in feature.geometry {
+                        if let line = geometry as? MKPolyline { polylines.append(line) }
+                        else if let multiLine = geometry as? MKMultiPolyline {
+                            polylines.append(contentsOf: multiLine.polylines)
+                        }
+                    }
                 }
+                DispatchQueue.main.async {
+                    guard let map, let coordinator, coordinator.mapView === map else { return }
+                    coordinator.boundaryLines = polylines
+                    polylines.forEach {
+                        map.addOverlay($0, level: .aboveLabels)
+                        MapStabilityDiagnostics.shared.increment(.overlayAddition)
+                    }
+                }
+            } catch {
+                #if DEBUG
+                os_log(.error, "District boundaries GeoJSON error: %{public}@", error.localizedDescription)
+                #endif
             }
-
-            coordinator.boundaryLines = polylines
-            polylines.forEach { map.addOverlay($0, level: .aboveLabels) }
-            #if DEBUG
-            print("✅ District boundaries loaded:", polylines.count)
-            #endif
-        } catch {
-            #if DEBUG
-            print("❌ District boundaries GeoJSON error:", error)
-            #endif
         }
     }
 
     // MARK: - MBTiles installs
     private func installOrRefreshAllMBTilesOverlays(on map: MKMapView, coordinator: Coordinator) {
-
+        #if DEBUG
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        defer {
+            MapStabilityDiagnostics.shared.record(
+                .reconciliation,
+                nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt
+            )
+        }
+        #endif
+        #if DEBUG
+        if !Thread.isMainThread {
+            MapStabilityDiagnostics.shared.increment(.mainThreadViolation)
+        }
+        #endif
         let offlineManager = OfflineMapsManager.shared
-        var shouldHave: Set<OfflinePack> = []
-
-        for pack in availablePacks {
-            if offlineManager.firstExistingLocalMBTilesURL(for: pack) != nil {
-                shouldHave.insert(pack)
-            }
+        var desired: [(
+            pack: OfflinePack,
+            url: URL,
+            record: InstalledMBTilesRecord?
+        )] = []
+        var installedRecordsByPath: [String: InstalledMBTilesRecord] = [:]
+        for record in offlineManager.installedRecordsSnapshot() {
+            installedRecordsByPath[record.url.standardizedFileURL.path] = record
         }
 
-        // Remove missing
-        let toRemove = coordinator.installedTilePacks.subtracting(shouldHave)
-        if !toRemove.isEmpty {
-            for pack in toRemove {
-                if let overlay = coordinator.tileOverlays[pack] {
-                    map.removeOverlay(overlay)
+        func desiredEntry(pack: OfflinePack, url: URL) -> (
+            pack: OfflinePack,
+            url: URL,
+            record: InstalledMBTilesRecord?
+        ) {
+            (pack, url, installedRecordsByPath[url.standardizedFileURL.path])
+        }
+
+        // Hidden alpha-zero overlays still generate MapKit tile traffic. Attach only the
+        // selected district versions and shoreline layers while that mode is visible.
+        if coordinator.basemapChoice == .districtsOffline {
+            for district in DistrictID.allCases {
+                guard let pack = offlineManager.selectedDownloadedDistrictMapPack(
+                    for: district,
+                    selectedMapVersion: coordinator.currentSelectedMapVersion
+                ), let url = offlineManager.firstExistingLocalMBTilesURL(for: pack) else { continue }
+                desired.append(desiredEntry(pack: pack, url: url))
+            }
+            for pack in OfflinePack.shorelinePacks {
+                if let url = offlineManager.firstExistingLocalMBTilesURL(for: pack) {
+                    desired.append(desiredEntry(pack: pack, url: url))
                 }
-                coordinator.tileOverlays[pack] = nil
             }
-            coordinator.installedTilePacks.subtract(toRemove)
         }
 
-        // Add new
-        let toAddSet = shouldHave.subtracting(coordinator.installedTilePacks)
-        if !toAddSet.isEmpty {
+        let desiredOverlays: [(
+            identity: MBTilesOverlayIdentity,
+            pack: OfflinePack,
+            url: URL,
+            coverageMapRect: MKMapRect?
+        )] = desired.map { item in
+            let role = MBTilesLayerRole.inferred(from: item.pack.slug)
+            let minimumZoom = item.record?.minimumZoom ?? minZForTiles
+            let storedMaximumZoom = item.record?.maximumZoom ?? maxZForTiles
+            let nativeMaximumZoom = max(
+                minimumZoom,
+                min(maxZForTiles, storedMaximumZoom)
+            )
+            let tileSizePixels = item.record.map { record in
+                record.tileWidth == record.tileHeight
+                    && (record.tileWidth == 256 || record.tileWidth == 512)
+                    ? record.tileWidth
+                    : 256
+            } ?? 256
+            let identity = MBTilesOverlayIdentity(
+                role: role,
+                packageIdentifier: item.pack.isDistrictMapPack ? item.pack.district.rawValue : item.pack.slug,
+                packageVersion: offlineManager.installedVersionIdentity(for: item.url) ?? item.pack.slug,
+                fileURL: item.url,
+                storageSchemeOverride: item.record?.storageScheme
+                    ?? MBTilesStorageScheme.explicitLegacyOverride(
+                        forPackageSlug: item.pack.slug
+                    ),
+                tileSizePixels: tileSizePixels,
+                minimumZoom: minimumZoom,
+                // Offline district and shoreline images above native z15 are drawn
+                // directly by the continuity renderer. The camera still reaches z17,
+                // but MapKit no longer manufactures 4/16 child requests per parent.
+                maximumZoom: role == .district || role == .shoreline
+                    ? nativeMaximumZoom
+                    : min(extendedOfflineMaxZForTiles, storedMaximumZoom),
+                nativeDetailMaximumZoom: nativeMaximumZoom,
+                maximumFallbackDepth: 6,
+                visualSettings: item.pack.isDistrictMapPack
+                    ? (coordinator.currentDistrictMapVisualSettingsBySlug[item.pack.slug] ?? .neutral)
+                    : .neutral,
+                canReplaceMapContent: false
+            )
+            return (
+                identity,
+                item.pack,
+                item.url,
+                MBTilesGeographicCoverage.mapRect(from: item.record?.bounds)
+            )
+        }
+        // Keep selection truth separate from the temporary installed-overlay set.
+        // During a readiness-gated replacement both the old and new versions are
+        // installed. Deriving the selected slug from that transient set made a v3
+        // selection wrap modulo two entries back to v2, so the new renderer received
+        // alpha zero and could never complete its first-tile handoff.
+        coordinator.desiredDistrictMapSlugByDistrict = Self.desiredDistrictMapSlugs(
+            from: desired.map(\.pack)
+        )
+        let plan = MBTilesOverlayReconciliationPlan(
+            current: Set(coordinator.installedMBTilesOverlays.keys),
+            desired: desiredOverlays.map(\.identity)
+        )
+        guard !plan.isNoOp else { return }
+        let additions = Set(plan.additions)
+        let removals = Set(plan.removals)
+        func logicalLayerKey(_ identity: MBTilesOverlayIdentity) -> String {
+            "\(identity.role.rawValue)|\(identity.packageIdentifier)"
+        }
 
-            let toAdd = toAddSet.sorted { a, b in
-                if a.district.rawValue != b.district.rawValue { return a.district.rawValue < b.district.rawValue }
-                let aVersion = a.districtMapVersion ?? Int.max
-                let bVersion = b.districtMapVersion ?? Int.max
-                if aVersion != bVersion { return aVersion < bVersion }
-                return a.slug < b.slug
+        // If a not-yet-ready replacement is itself superseded, carry its last known-good
+        // predecessor forward and retire the intermediate overlay instead of stacking versions.
+        var carriedRetirements: [String: Set<MBTilesOverlayIdentity>] = [:]
+        for (replacement, predecessors) in Array(coordinator.pendingMBTilesRetirements) where removals.contains(replacement) {
+            carriedRetirements[logicalLayerKey(replacement), default: []].formUnion(predecessors)
+            coordinator.pendingMBTilesRetirements.removeValue(forKey: replacement)
+        }
+
+        // Attach validated replacement identities first so a working layer does not
+        // disappear between versions. Its predecessor stays below it until MapKit receives
+        // real bytes from the replacement; no arbitrary delay or viewport reset is involved.
+        for (desiredIndex, item) in desiredOverlays.enumerated() where additions.contains(item.identity) {
+            let overlay = MBTilesOverlay(
+                mbtilesURL: item.url,
+                slug: item.pack.slug,
+                packageIdentifier: item.identity.packageIdentifier,
+                packageVersion: item.identity.packageVersion,
+                role: item.identity.role,
+                storageSchemeOverride: item.identity.storageSchemeOverride,
+                minimumZoom: item.identity.minimumZoom,
+                maximumZoom: item.identity.maximumZoom,
+                tileSizePixels: item.identity.tileSizePixels,
+                maximumFallbackDepth: item.identity.maximumFallbackDepth,
+                canReplaceMapContent: false,
+                visualSettings: item.identity.visualSettings,
+                nativeDetailMaximumZ: item.identity.nativeDetailMaximumZoom,
+                coverageMapRect: item.coverageMapRect,
+                immutableFile: offlineManager.isImmutableInstalledURL(item.url)
+            )
+            let usesNativeContinuity = item.identity.role == .district
+                || item.identity.role == .shoreline
+            let backstop: DistrictMapBackstopOverlay? = usesNativeContinuity
+                ? DistrictMapBackstopOverlay(
+                    slug: item.pack.slug,
+                    identity: item.identity,
+                    packageSession: overlay.packageSession,
+                    boundingMapRect: item.coverageMapRect
+                )
+                : nil
+            overlay.rendersThroughBackstop = backstop != nil
+            if let backstop {
+                coordinator.districtBackstopOverlays[item.identity] = backstop
+                backstop.activate()
             }
-
-            for pack in toAdd {
-                guard let url = offlineManager.firstExistingLocalMBTilesURL(for: pack) else { continue }
-                let overlay = MBTilesOverlay(mbtilesURL: url, slug: pack.slug)
-                overlay.minimumZ = minZForTiles
-                overlay.maximumZ = maxZForTiles
-
-                // Register before adding so rendererFor can immediately calculate the correct alpha.
-                coordinator.tileOverlays[pack] = overlay
-                coordinator.installedTilePacks.insert(pack)
+            // Publish the replacement identity before beginning readiness work.
+            // Empty/off-coverage readiness can complete synchronously.
+            coordinator.installedMBTilesOverlays[item.identity] = overlay
+            let logicalKey = logicalLayerKey(item.identity)
+            let directPredecessors = Set(plan.removals.filter { logicalLayerKey($0) == logicalKey })
+            let predecessors = carriedRetirements[logicalKey] ?? directPredecessors
+            if !predecessors.isEmpty {
+                coordinator.pendingMBTilesRetirements[item.identity] = predecessors
+                let retirePredecessors = { [weak map, weak coordinator, weak overlay] in
+                    DispatchQueue.main.async {
+                        guard let map, let coordinator, let overlay,
+                              coordinator.mapView === map,
+                              coordinator.installedMBTilesOverlays[item.identity] === overlay else { return }
+                        let retired = coordinator.pendingMBTilesRetirements.removeValue(forKey: item.identity) ?? []
+                        for identity in retired {
+                            guard let predecessor = coordinator.installedMBTilesOverlays.removeValue(forKey: identity) else { continue }
+                            coordinator.discardRenderer(for: predecessor)
+                            map.removeOverlay(predecessor)
+                            MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+                            if let retiredBackstop = coordinator.districtBackstopOverlays.removeValue(forKey: identity) {
+                                coordinator.discardRenderer(for: retiredBackstop)
+                                map.removeOverlay(retiredBackstop)
+                                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+                            }
+                            coordinator.overlayRemovalCount += 1
+                        }
+                        if !retired.isEmpty { coordinator.overlayReplacementCount += 1 }
+                        #if DEBUG
+                        os_log(.info, "Activated ready MBTiles replacement %{public}@", item.identity.description)
+                        #endif
+                    }
+                }
+                if let backstop {
+                    coordinator.retireAfterCurrentVisibleCoverageIsReady(
+                        backstop: backstop,
+                        on: map,
+                        stillValid: { [weak coordinator, weak overlay] in
+                            guard let coordinator, let overlay else { return false }
+                            return coordinator.installedMBTilesOverlays[item.identity] === overlay
+                        },
+                        completion: retirePredecessors
+                    )
+                } else {
+                    overlay.whenFirstTileIsReady(retirePredecessors)
+                }
+            }
+            coordinator.overlayAttachmentCount += 1
+            #if DEBUG
+            os_log(.info, "Attaching MBTiles overlay %{public}@", item.identity.description)
+            #endif
+            let nextInstalledOverlay = desiredOverlays.dropFirst(desiredIndex + 1).lazy
+                .compactMap { coordinator.installedMBTilesOverlays[$0.identity] }
+                .first
+            if let nextInstalledOverlay {
+                map.insertOverlay(overlay, below: nextInstalledOverlay)
+            } else if let sstOverlay = coordinator.sstOverlay {
+                map.insertOverlay(overlay, below: sstOverlay)
+            } else {
                 map.addOverlay(overlay, level: .aboveRoads)
             }
-
+            MapStabilityDiagnostics.shared.increment(.overlayAddition)
+            if let backstop {
+                map.insertOverlay(backstop, below: overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayAddition)
+            }
         }
 
-        if !toAddSet.isEmpty || !toRemove.isEmpty {
-            coordinator.applySelectedMapVersion(on: map, selectedMapVersion: coordinator.currentSelectedMapVersion)
-            if let sstOverlay = coordinator.sstOverlay {
-                map.removeOverlay(sstOverlay)
-                map.addOverlay(sstOverlay, level: .aboveRoads)
+        let protectedPredecessors = coordinator.pendingMBTilesRetirements.values.reduce(into: Set<MBTilesOverlayIdentity>()) {
+            $0.formUnion($1)
+        }
+        for identity in plan.removals where !protectedPredecessors.contains(identity) {
+            guard let overlay = coordinator.installedMBTilesOverlays.removeValue(forKey: identity) else { continue }
+            coordinator.discardRenderer(for: overlay)
+            map.removeOverlay(overlay)
+            MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+            if let backstop = coordinator.districtBackstopOverlays.removeValue(forKey: identity) {
+                coordinator.discardRenderer(for: backstop)
+                map.removeOverlay(backstop)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
+            coordinator.overlayRemovalCount += 1
+            #if DEBUG
+            os_log(.info, "Removing MBTiles overlay %{public}@", identity.description)
+            #endif
         }
     }
 
@@ -595,7 +1210,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         if wantedKey == nil {
             if let overlay = coordinator.sstOverlay {
+                coordinator.discardRenderer(for: overlay)
                 map.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
                 coordinator.sstOverlay = nil
                 coordinator.sstOverlayKey = nil
             }
@@ -604,24 +1221,30 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         if coordinator.sstOverlayKey != wantedKey {
             if let overlay = coordinator.sstOverlay {
+                coordinator.discardRenderer(for: overlay)
                 map.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
 
             let overlay = SeaSurfaceTemperatureOverlay(source: sstSource, dateUTC: sstDateUTC)
             overlay.minimumZ = 0
             overlay.maximumZ = sstSource.recommendedMaximumZ
             map.addOverlay(overlay, level: .aboveRoads)
+            MapStabilityDiagnostics.shared.increment(.overlayAddition)
             coordinator.sstOverlay = overlay
             coordinator.sstOverlayKey = wantedKey
         }
 
-        let clampedOpacity = max(0.0, min(1.0, sstOpacity))
-        if abs(coordinator.currentSSTOpacity - clampedOpacity) > 0.001 {
+        let clampedOpacity = Double(MapRendererOpacityController.normalized(CGFloat(sstOpacity)))
+        if abs(coordinator.currentSSTOpacity - clampedOpacity)
+            > Double(MapRendererOpacityController.epsilon) {
             coordinator.currentSSTOpacity = clampedOpacity
             if let overlay = coordinator.sstOverlay,
                let renderer = map.renderer(for: overlay) as? MKTileOverlayRenderer {
-                renderer.alpha = CGFloat(clampedOpacity)
-                renderer.setNeedsDisplay()
+                _ = coordinator.rendererOpacityController.apply(
+                    CGFloat(clampedOpacity),
+                    to: renderer
+                )
             }
         }
     }
@@ -635,6 +1258,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         let minZForTiles: Int
         let maxZ: Double
         let maxZForTiles: Int
+        let extendedOfflineMaxZ: Double
+        let extendedOfflineMaxZForTiles: Int
         let initialLaunchZoom: Double
 
         func disengageFollow() {
@@ -722,7 +1347,7 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         func zoom(_ mapView: MKMapView, delta: Int) {
             // delta: +1 zoom in, -1 zoom out
-            let currentZoom = zoomLevel(for: mapView)
+            let currentZoom = zoomGate.targetZoom ?? zoomLevel(for: mapView)
             let maximumZoom = currentMaximumZoom
 
             // IMPORTANT:
@@ -733,20 +1358,25 @@ struct MapViewRepresentable: UIViewRepresentable {
 
             let center = mapView.centerCoordinate
             let rect = mapRect(center: center, zoom: targetZoom, in: mapView)
-            mapView.setVisibleMapRect(rect, animated: false)
-
-            // Kick the render loop so overlays update immediately
-            DispatchQueue.main.async {
-                mapView.setVisibleMapRect(mapView.visibleMapRect, animated: false)
-                mapView.setNeedsLayout()
-                mapView.layoutIfNeeded()
-                mapView.setNeedsDisplay()
+            let sources = activeRasterContinuities(on: mapView)
+            let commit: @MainActor @Sendable () -> Void = { [weak self, weak mapView] in
+                guard let self, let mapView, !self.isDismantled else { return }
+                self.setVisibleMapRectIfNeeded(rect, on: mapView, animated: true, timeout: 0.8)
             }
+            guard !sources.isEmpty else { commit(); return }
+            zoomGate.request(targetZoom: targetZoom, preload: { ready in
+                RasterMapContinuity.prepareAll(sources, in: rect,
+                                               zoom: Int(targetZoom.rounded()), completion: ready)
+            }, commit: commit)
         }
 
 
         var lastSelectedMapVersion: Int = 0
-        var currentSelectedMapVersion: Int = 1
+        private let zoomGate = RasterZoomGate()
+        var currentSelectedMapVersion: Int = 1 {
+            didSet { if oldValue != currentSelectedMapVersion { zoomGate.cancel() } }
+        }
+        var currentDistrictMapVisualSettingsBySlug: [String: DistrictMapVisualSettings] = [:]
         var sstOverlay: SeaSurfaceTemperatureOverlay?
         var sstOverlayKey: String?
         var currentSSTOpacity: Double = 0.0
@@ -755,6 +1385,8 @@ struct MapViewRepresentable: UIViewRepresentable {
             switch basemapChoice {
             case .topoOnline:
                 return max(maxZ, Double(USGSTopoOnlineTileOverlay.nativeMaximumZ))
+            case .districtsOffline, .appleSatellite, .bristolBaySatelliteOffline:
+                return extendedOfflineMaxZ
             default:
                 return maxZ
             }
@@ -983,15 +1615,122 @@ struct MapViewRepresentable: UIViewRepresentable {
         private var lastNearestBoundaryCoord: CLLocationCoordinate2D?
         private let nearestBoundaryHighlightLengthMeters: CLLocationDistance = 600.0 / 3.28084
 
-        // Tiles installed
-        // Tiles installed
-        var installedTilePacks: Set<OfflinePack> = []
-        var tileOverlays: [OfflinePack: MKTileOverlay] = [:]
+        // Stable desired-versus-installed state for local MBTiles overlays.
+        var installedMBTilesOverlays: [MBTilesOverlayIdentity: MBTilesOverlay] = [:]
+        var districtBackstopOverlays: [MBTilesOverlayIdentity: DistrictMapBackstopOverlay] = [:]
+        var pendingMBTilesRetirements: [MBTilesOverlayIdentity: Set<MBTilesOverlayIdentity>] = [:]
+        var desiredDistrictMapSlugByDistrict: [DistrictID: String] = [:]
+        var rendererByOverlayID: [ObjectIdentifier: MKOverlayRenderer] = [:]
+        var overlayAttachmentCount = 0
+        var overlayRemovalCount = 0
+        var overlayReplacementCount = 0
+        var reloadDataCallCount = 0
+        private(set) var rendererCreationCount = 0
+        let rendererOpacityController = MapRendererOpacityController()
+        var hasSynchronizedSwiftUIMapPresentation = false
+        var lastOfflineInventoryRevision: Int?
+        let schedulerInteractionOwnerID = UUID()
+
+        private var settledUpdateGate = MapSettledUpdateGate()
+        #if DEBUG
+        private var movementStartedAt: UInt64?
+        #endif
+        private var cameraFeedbackGuard = MapCameraFeedbackGuard()
+        private var deferredSwiftUIUpdate: (() -> Void)?
+        private var interactionClearWorkItem: DispatchWorkItem?
+        private var cameraSettleWorkItem: DispatchWorkItem?
+        private var lastCameraActivityUptime: TimeInterval = 0
+        private var deferredCoverageReadiness: [ObjectIdentifier: () -> Void] = [:]
+        private var coverageReadinessDrain: [() -> Void] = []
+        private var coverageReadinessDrainScheduled = false
+        private var schedulerInteractionActive = false
+        private var isDismantled = false
+        private var lastContinuousViewportHintUptime: TimeInterval = 0
+        private let continuousViewportHintInterval: TimeInterval = 0.125
+        private let cameraSettleDelay: TimeInterval = 0.150
+
+        var isCameraMovementActive: Bool {
+            settledUpdateGate.isMoving
+        }
+
+        private func beginCameraMovement() {
+            guard !isDismantled else { return }
+            #if DEBUG
+            if !settledUpdateGate.isMoving {
+                movementStartedAt = DispatchTime.now().uptimeNanoseconds
+            }
+            #endif
+            if !settledUpdateGate.isMoving {
+                setRasterCameraMovementActive(true)
+            }
+            lastCameraActivityUptime = ProcessInfo.processInfo.systemUptime
+            setSchedulerInteractionActive(true)
+            settledUpdateGate.beginMovement()
+        }
+
+        private func noteContinuousCameraMovement() {
+            beginCameraMovement()
+        }
+
+        func deferSwiftUIUpdate(_ update: @escaping () -> Void) {
+            // Replace, rather than enqueue, so a rapid stream of unrelated SwiftUI
+            // changes retains only the newest value snapshot during a gesture.
+            deferredSwiftUIUpdate = update
+        }
+
+        private func performDeferredSwiftUIUpdateIfNeeded() {
+            let update = deferredSwiftUIUpdate
+            deferredSwiftUIUpdate = nil
+            update?()
+        }
+
+        private func setSchedulerInteractionActive(_ isActive: Bool) {
+            guard schedulerInteractionActive != isActive else { return }
+            schedulerInteractionActive = isActive
+            MBTilesWorkScheduler.shared.setMapInteractionActive(
+                isActive,
+                ownerID: schedulerInteractionOwnerID
+            )
+        }
+
+        func prepareForDismantle() {
+            isDismantled = true
+            zoomGate.cancel()
+            deferredSwiftUIUpdate = nil
+            deferredCoverageReadiness.removeAll()
+            coverageReadinessDrain.removeAll()
+            coverageReadinessDrainScheduled = false
+            interactionClearWorkItem?.cancel()
+            interactionClearWorkItem = nil
+            cameraSettleWorkItem?.cancel()
+            cameraSettleWorkItem = nil
+            lastCameraActivityUptime = 0
+            settledUpdateGate = MapSettledUpdateGate()
+            #if DEBUG
+            movementStartedAt = nil
+            #endif
+            setSchedulerInteractionActive(false)
+            lastContinuousViewportHintUptime = 0
+            programmaticGuardClearWorkItem?.cancel()
+            programmaticGuardClearWorkItem = nil
+            programmaticRegionChangeUntil = .distantPast
+            mapView = nil
+        }
+
+        private var onlineDistrictOverlays: [String: OnlineDistrictTileOverlay] = [:]
 
         // Basemap
-        var basemapChoice: BasemapChoice = .bristolBaySatelliteOnline
+        var basemapChoice: BasemapChoice = .districtsOnline {
+            didSet { if oldValue != basemapChoice { zoomGate.cancel() } }
+        }
         private var noaaBasemapOverlay: MKTileOverlay?
+        private var pendingBasemapPredecessor: MKTileOverlay?
+        private var basemapBackstopByOverlayID: [ObjectIdentifier: DistrictMapBackstopOverlay] = [:]
         private var noaaBasemapKey: String?
+        private var lastMBTilesViewportZoom: Double?
+        private var lastMBTilesPrefetchAnchor: MBTilesTileCoordinate?
+        private var lastMBTilesPrefetchZooms: [Int] = []
+        private var lastMBTilesPrefetchIdentities: Set<MBTilesOverlayIdentity> = []
 
         // Scale output
         private(set) var metersPerPoint: Double = 0
@@ -1111,23 +1850,140 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // Distinguish our own setCenter/setVisibleMapRect calls from user gestures
         private var programmaticRegionChangeUntil: Date = .distantPast
+        private var programmaticGuardGeneration: UInt64 = 0
+        private var programmaticGuardClearWorkItem: DispatchWorkItem?
 
         /// Wrap programmatic map region changes so `regionWillChange/DidChange` don't treat them as user gestures.
         /// For animated changes, MapKit callbacks can arrive after the next runloop tick, so we keep a timeout.
         func withProgrammaticRegionChange(timeout: TimeInterval = 1.0, _ block: () -> Void) {
+            programmaticGuardGeneration &+= 1
+            let generation = programmaticGuardGeneration
             programmaticRegionChangeUntil = Date().addingTimeInterval(timeout)
+            programmaticGuardClearWorkItem?.cancel()
             block()
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-                guard let self else { return }
-                if Date() >= self.programmaticRegionChangeUntil {
-                    self.programmaticRegionChangeUntil = .distantPast
-                }
+            let clear = DispatchWorkItem { [weak self] in
+                guard let self,
+                      self.programmaticGuardGeneration == generation else { return }
+                self.programmaticRegionChangeUntil = .distantPast
+                self.programmaticGuardClearWorkItem = nil
             }
+            programmaticGuardClearWorkItem = clear
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: clear)
         }
 
         private var programmaticRegionChange: Bool {
             Date() <= programmaticRegionChangeUntil
+        }
+
+        private func cameraState(for mapView: MKMapView) -> MapCameraState {
+            MapCameraState(
+                latitude: mapView.centerCoordinate.latitude,
+                longitude: mapView.centerCoordinate.longitude,
+                zoom: zoomLevel(for: mapView),
+                heading: mapView.camera.heading,
+                pitch: mapView.camera.pitch
+            )
+        }
+
+        private func cameraState(for rect: MKMapRect, in mapView: MKMapView) -> MapCameraState {
+            let center = MKMapPoint(
+                x: rect.midX,
+                y: rect.midY
+            ).coordinate
+            let viewWidth = Double(max(mapView.bounds.width, 1))
+            let mapPointsPerPoint = rect.size.width / viewWidth
+            let zoom = log2(MKMapSize.world.width / (256 * mapPointsPerPoint))
+            return MapCameraState(
+                latitude: center.latitude,
+                longitude: center.longitude,
+                zoom: zoom.isFinite ? zoom : 0,
+                heading: mapView.camera.heading,
+                pitch: mapView.camera.pitch
+            )
+        }
+
+        @discardableResult
+        func setCenterIfNeeded(
+            _ center: CLLocationCoordinate2D,
+            on mapView: MKMapView,
+            animated: Bool,
+            timeout: TimeInterval = 1.0
+        ) -> Bool {
+            guard CLLocationCoordinate2DIsValid(center) else {
+                MapStabilityDiagnostics.shared.increment(.programmaticCameraSkip)
+                return false
+            }
+            let current = cameraState(for: mapView)
+            let requested = MapCameraState(
+                latitude: center.latitude,
+                longitude: center.longitude,
+                zoom: current.zoom,
+                heading: current.heading,
+                pitch: current.pitch
+            )
+            guard cameraFeedbackGuard.shouldApplyProgrammaticRequest(
+                requested,
+                current: current
+            ) else {
+                MapStabilityDiagnostics.shared.increment(.programmaticCameraSkip)
+                return false
+            }
+            MapStabilityDiagnostics.shared.increment(.programmaticCameraApply)
+            withProgrammaticRegionChange(timeout: timeout) {
+                mapView.setCenter(center, animated: animated)
+            }
+            return true
+        }
+
+        @discardableResult
+        func setVisibleMapRectIfNeeded(
+            _ rect: MKMapRect,
+            on mapView: MKMapView,
+            animated: Bool,
+            timeout: TimeInterval = 1.0
+        ) -> Bool {
+            guard !rect.isNull, !rect.isEmpty,
+                  rect.origin.x.isFinite, rect.origin.y.isFinite,
+                  rect.size.width.isFinite, rect.size.height.isFinite else {
+                MapStabilityDiagnostics.shared.increment(.programmaticCameraSkip)
+                return false
+            }
+            let current = cameraState(for: mapView)
+            let requested = cameraState(for: rect, in: mapView)
+            guard cameraFeedbackGuard.shouldApplyProgrammaticRequest(
+                requested,
+                current: current
+            ) else {
+                MapStabilityDiagnostics.shared.increment(.programmaticCameraSkip)
+                return false
+            }
+            MapStabilityDiagnostics.shared.increment(.programmaticCameraApply)
+            withProgrammaticRegionChange(timeout: timeout) {
+                mapView.setVisibleMapRect(rect, animated: animated)
+            }
+            return true
+        }
+
+        private func restoreNorthUpIfNeeded(on mapView: MKMapView) {
+            let current = cameraState(for: mapView)
+            let requested = MapCameraState(
+                latitude: current.latitude,
+                longitude: current.longitude,
+                zoom: current.zoom,
+                heading: 0,
+                pitch: current.pitch
+            )
+            guard cameraFeedbackGuard.shouldApplyProgrammaticRequest(
+                requested,
+                current: current
+            ) else { return }
+            let camera = mapView.camera
+            camera.heading = 0
+            MapStabilityDiagnostics.shared.increment(.programmaticCameraApply)
+            withProgrammaticRegionChange(timeout: 0.3) {
+                mapView.camera = camera
+            }
         }
         func snapCursorToUser(on mapView: MKMapView) {
             guard let userLoc = mapView.userLocation.location else { return }
@@ -1151,6 +2007,8 @@ struct MapViewRepresentable: UIViewRepresentable {
             minZForTiles: Int,
             maxZ: Double,
             maxZForTiles: Int,
+            extendedOfflineMaxZ: Double,
+            extendedOfflineMaxZForTiles: Int,
             initialLaunchZoom: Double,
             initialCursorTrackingUser: Bool,
             onDistanceText: @escaping (String) -> Void,
@@ -1164,6 +2022,8 @@ struct MapViewRepresentable: UIViewRepresentable {
             self.minZForTiles = minZForTiles
             self.maxZ = maxZ
             self.maxZForTiles = maxZForTiles
+            self.extendedOfflineMaxZ = extendedOfflineMaxZ
+            self.extendedOfflineMaxZForTiles = extendedOfflineMaxZForTiles
             self.initialLaunchZoom = initialLaunchZoom
             self.onDistanceText = onDistanceText
             self.onSpeedText = onSpeedText
@@ -1310,6 +2170,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                         let line = MKPolyline(coordinates: coordinates, count: coordinates.count)
                         fishingSetOverlays[set.id] = line
                         mapView.addOverlay(line, level: .aboveLabels)
+                        MapStabilityDiagnostics.shared.increment(.overlayAddition)
                     }
 
                     for (index, location) in sortedLocations.enumerated() {
@@ -1343,7 +2204,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         private func removeFishingSetOverlays(setID: UUID, from mapView: MKMapView) {
             if let overlay = fishingSetOverlays.removeValue(forKey: setID) {
+                discardRenderer(for: overlay)
                 mapView.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
 
             if let label = fishingSetNumberAnnotations.removeValue(forKey: setID) {
@@ -1408,7 +2271,9 @@ struct MapViewRepresentable: UIViewRepresentable {
                 portMollerTestFisheryStationAnnotations.removeAll()
 
                 if let overlay = portMollerTestFisheryTransectOverlay {
+                    discardRenderer(for: overlay)
                     mapView.removeOverlay(overlay)
+                    MapStabilityDiagnostics.shared.increment(.overlayRemoval)
                     portMollerTestFisheryTransectOverlay = nil
                 }
                 return
@@ -1443,6 +2308,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 )
                 portMollerTestFisheryTransectOverlay = overlay
                 mapView.addOverlay(overlay, level: .aboveLabels)
+                MapStabilityDiagnostics.shared.increment(.overlayAddition)
             }
         }
 
@@ -1614,7 +2480,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         private func clearLiveTrailState(on mapView: MKMapView) {
             for overlay in liveTrailOverlaysBySegmentID.values {
+                discardRenderer(for: overlay)
                 mapView.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
             liveTrailPointsByOwnerUid.removeAll()
             liveTrailSegmentsByOwnerUid.removeAll()
@@ -1628,7 +2496,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             let activeIDs = Set(activeSegments.map(\.id))
 
             for (segmentID, overlay) in liveTrailOverlaysBySegmentID where !activeIDs.contains(segmentID) {
+                discardRenderer(for: overlay)
                 mapView.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
                 liveTrailMetadataByOverlayID.removeValue(forKey: ObjectIdentifier(overlay))
             }
             liveTrailOverlaysBySegmentID = liveTrailOverlaysBySegmentID.filter { activeIDs.contains($0.key) }
@@ -1654,6 +2524,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                     createdAt: segment.createdAt
                 )
                 mapView.addOverlay(overlay, level: .aboveLabels)
+                MapStabilityDiagnostics.shared.increment(.overlayAddition)
             }
         }
 
@@ -1721,24 +2592,8 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // MARK: - District map version cycling
 
-        private func installedDistrictMapPacks(for district: DistrictID) -> [OfflinePack] {
-            installedTilePacks
-                .filter { $0.district == district && $0.isDistrictMapPack }
-                .sorted { lhs, rhs in
-                    let lhsVersion = lhs.districtMapVersion ?? Int.max
-                    let rhsVersion = rhs.districtMapVersion ?? Int.max
-                    if lhsVersion != rhsVersion { return lhsVersion < rhsVersion }
-                    return lhs.slug < rhs.slug
-                }
-        }
-
         private func selectedDistrictMapSlug(for district: DistrictID) -> String? {
-            let packs = installedDistrictMapPacks(for: district)
-            guard !packs.isEmpty else { return nil }
-
-            let normalizedVersion = max(1, currentSelectedMapVersion)
-            let index = (normalizedVersion - 1) % packs.count
-            return packs[index].slug
+            desiredDistrictMapSlugByDistrict[district]
         }
 
         private func isShorelineOverlay(slug: String) -> Bool {
@@ -1761,35 +2616,21 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         func applySelectedMapVersion(on mapView: MKMapView, selectedMapVersion: Int) {
             currentSelectedMapVersion = max(1, selectedMapVersion)
+        }
 
-            let districtOfflineOverlays: [MBTilesOverlay] = mapView.overlays
-                .compactMap { $0 as? MBTilesOverlay }
-                .filter { isDistrictOrShorelineOverlay(slug: $0.slug) }
-
-            for overlay in districtOfflineOverlays {
-                if let r = mapView.renderer(for: overlay) as? MKTileOverlayRenderer {
-                    r.alpha = tileAlpha(for: overlay.slug)
-                    r.reloadData()
-                    r.setNeedsDisplay()
-                }
-            }
-
-            if basemapChoice == .districtsOffline && !districtOfflineOverlays.isEmpty {
-                districtOfflineOverlays.forEach { mapView.removeOverlay($0) }
-                districtOfflineOverlays.forEach { mapView.addOverlay($0, level: .aboveRoads) }
-            }
-
-            if let sstOverlay = sstOverlay {
-                mapView.removeOverlay(sstOverlay)
-                mapView.addOverlay(sstOverlay, level: .aboveRoads)
-            }
-
-            DispatchQueue.main.async {
-                mapView.setVisibleMapRect(mapView.visibleMapRect, animated: false)
-                mapView.setNeedsLayout()
-                mapView.layoutIfNeeded()
-                mapView.setNeedsDisplay()
-            }
+        func applyDistrictMapVisualSettings(
+            _ settingsBySlug: [String: DistrictMapVisualSettings],
+            on mapView: MKMapView
+        ) -> Bool {
+            let normalized = settingsBySlug.mapValues { $0.normalized }
+            guard normalized != currentDistrictMapVisualSettingsBySlug else { return false }
+            zoomGate.cancel()
+            currentDistrictMapVisualSettingsBySlug = normalized
+            // These adjustments alter tile bytes, so identity reconciliation performs
+            // a readiness-gated generation handoff. A broad map redraw here would race
+            // that handoff and add main-thread work without changing the output.
+            _ = mapView
+            return true
         }
 
         // MARK: - Gesture hooks
@@ -1847,8 +2688,10 @@ struct MapViewRepresentable: UIViewRepresentable {
         }
 
         @objc private func handleGesture(_ gr: UIGestureRecognizer) {
-            dlog("handleGesture \(type(of: gr)) state=\(grStateName(gr.state)) isFollowing=\(isFollowingUser) suppressUntil=\(suppressFollowUntil)")
-            if gr.state == .began || gr.state == .changed {
+            guard !isDismantled else { return }
+            if gr.state == .began {
+                dlog("handleGesture began type=\(type(of: gr))")
+                beginCameraMovement()
                 regionChangeFromUserInteraction = true
 
                 // Immediately disengage Follow on any user pan/zoom gesture.
@@ -1857,21 +2700,37 @@ struct MapViewRepresentable: UIViewRepresentable {
                     disengageFollow()
                 }
 
+            } else if gr.state == .changed {
+                // Constant-time gesture state only. MapKit's asynchronous tile
+                // requests continue independently through the bounded tile engine.
+                noteContinuousCameraMovement()
+                regionChangeFromUserInteraction = true
             } else if gr.state == .ended || gr.state == .cancelled || gr.state == .failed {
 
                 // Keep follow suppressed through deceleration + next likely GPS tick.
                 suppressFollow(for: 2.0)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in
-                    self?.regionChangeFromUserInteraction = false
-                }
+                scheduleInteractionClear(after: 0.20)
+                if let mapView { scheduleCameraSettle(on: mapView) }
             }
+        }
+
+        private func scheduleInteractionClear(after delay: TimeInterval) {
+            interactionClearWorkItem?.cancel()
+            let clear = DispatchWorkItem { [weak self] in
+                self?.regionChangeFromUserInteraction = false
+                self?.interactionClearWorkItem = nil
+            }
+            interactionClearWorkItem = clear
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: clear)
         }
 
         // MARK: - Map callbacks
 
         func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
             dlog("regionWillChange programmatic=\(programmaticRegionChange) interacting=\(userIsInteracting(with: mapView)) isFollowing=\(isFollowingUser)")
+            zoomGate.cancel()
+            beginCameraMovement()
+            scheduleCameraSettle(on: mapView)
             // MapKit can still be in a "programmatic" window when the user begins to pan
             // (e.g., right after an animated setCenter). So we must check the gesture states.
             if userIsInteracting(with: mapView) {
@@ -1880,41 +2739,173 @@ struct MapViewRepresentable: UIViewRepresentable {
             }
         }
         func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-            dlog("didChangeVisibleRegion interacting=\(userIsInteracting(with: mapView)) isFollowing=\(isFollowingUser)")
-            if userIsInteracting(with: mapView) {
-                regionChangeFromUserInteraction = true
-                if isFollowingUser {
-                    disengageFollow()
-                }
+            #if DEBUG
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            defer {
+                MapStabilityDiagnostics.shared.record(
+                    .visibleRegion,
+                    nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt
+                )
             }
-            if mapView.camera.heading != 0 {
-                let cam = mapView.camera
-                cam.heading = 0
-                withProgrammaticRegionChange(timeout: 0.3) {
-                    mapView.camera = cam
-                }
+            #endif
+            #if DEBUG
+            if !Thread.isMainThread {
+                MapStabilityDiagnostics.shared.increment(.mainThreadViolation)
             }
-
-            clampZoomIfNeeded(mapView)
-            updateScale(mapView)
-            refreshUserMarker(mapView)
-            syncBasemap(on: mapView)
+            #endif
+            // This is deliberately the entire continuous-camera fast path.
+            // No SwiftUI publication, renderer mutation, overlay reconciliation,
+            // file/database/image work, camera assignment, or prefetch occurs here.
+            noteContinuousCameraMovement()
+            // MapKit can enqueue destination tiles before the settled callback. Give
+            // the scheduler a tiny, throttled center/zoom hint so those visible
+            // requests are stamped with the destination generation instead of being
+            // cancelled as stale the instant the gesture settles.
+            scheduleCameraSettle(on: mapView)
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastContinuousViewportHintUptime >= continuousViewportHintInterval {
+                lastContinuousViewportHintUptime = now
+                updateMBTilesViewportHints(
+                    mapView,
+                    allowPrefetch: false,
+                    commitGeneration: false
+                )
+            }
         }
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            scheduleCameraSettle(on: mapView)
+        }
+
+        /// MapKit may emit visible-region callbacks at display cadence. Keep one
+        /// trailing-edge deadline pump alive instead of allocating and cancelling a
+        /// delayed work item for every frame. The pump settles only after a full quiet
+        /// interval, so intermediate cameras never commit tile generations.
+        private func scheduleCameraSettle(on mapView: MKMapView) {
+            guard !isDismantled else { return }
+            lastCameraActivityUptime = ProcessInfo.processInfo.systemUptime
+            enqueueCameraSettleCheck(on: mapView, after: cameraSettleDelay)
+        }
+
+        private func enqueueCameraSettleCheck(
+            on mapView: MKMapView,
+            after delay: TimeInterval
+        ) {
+            guard !isDismantled, cameraSettleWorkItem == nil else { return }
+
+            let settle = DispatchWorkItem { [weak self, weak mapView] in
+                guard let self else { return }
+                self.cameraSettleWorkItem = nil
+                guard !self.isDismantled,
+                      let mapView,
+                      self.mapView === mapView else { return }
+                if self.userIsInteracting(with: mapView) {
+                    self.enqueueCameraSettleCheck(
+                        on: mapView,
+                        after: self.cameraSettleDelay
+                    )
+                    return
+                }
+                let quietDuration = ProcessInfo.processInfo.systemUptime
+                    - self.lastCameraActivityUptime
+                if quietDuration < self.cameraSettleDelay {
+                    self.enqueueCameraSettleCheck(
+                        on: mapView,
+                        after: max(0.01, self.cameraSettleDelay - quietDuration)
+                    )
+                    return
+                }
+                self.performSettledCameraUpdate(on: mapView)
+            }
+            cameraSettleWorkItem = settle
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + max(0.01, delay),
+                execute: settle
+            )
+        }
+
+        private func performSettledCameraUpdate(on mapView: MKMapView) {
+            guard let settledGeneration = settledUpdateGate.consumeSettledGeneration(),
+                  settledUpdateGate.isCurrent(settledGeneration) else {
+                setSchedulerInteractionActive(false)
+                return
+            }
+            #if DEBUG
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            defer {
+                MapStabilityDiagnostics.shared.record(
+                    .settledUpdate,
+                    nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt
+                )
+            }
+            #endif
+            #if DEBUG
+            if let movementStartedAt {
+                MapStabilityDiagnostics.shared.record(
+                    .movementInterval,
+                    nanoseconds: DispatchTime.now().uptimeNanoseconds &- movementStartedAt
+                )
+                self.movementStartedAt = nil
+            }
+            #endif
+
             // If a gesture caused this region change, suppress follow briefly after the gesture ends.
             if regionChangeFromUserInteraction {
                 suppressFollow(for: 2.0)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                    self?.regionChangeFromUserInteraction = false
-                }
+                scheduleInteractionClear(after: 0.25)
             }
 
+            performDeferredSwiftUIUpdateIfNeeded()
+            restoreNorthUpIfNeeded(on: mapView)
             clampZoomIfNeeded(mapView)
             updateScale(mapView)
             refreshUserMarker(mapView)
             syncBasemap(on: mapView)
+            // A deferred update, north-up correction, or zoom clamp above can begin
+            // another MapKit camera generation synchronously. Only the generation
+            // that is still settled may commit tile cancellation state.
+            guard !settledUpdateGate.isMoving,
+                  settledUpdateGate.isCurrent(settledGeneration) else { return }
+            setRasterCameraMovementActive(false)
+            updateMBTilesViewportHints(mapView)
+            _ = cameraFeedbackGuard.recordMapKitEmission(cameraState(for: mapView))
+            setSchedulerInteractionActive(false)
+            performDeferredCoverageReadinessIfNeeded()
+
+            if programmaticRegionChange {
+                programmaticGuardClearWorkItem?.cancel()
+                programmaticGuardClearWorkItem = nil
+                programmaticRegionChangeUntil = .distantPast
+            }
+
+            #if DEBUG
+            if MapStabilityDiagnostics.shared.snapshot().settledUpdateCount % 25 == 0 {
+                MapStabilityDiagnostics.shared.logSnapshot()
+            }
+            #endif
+        }
+
+        private func performDeferredCoverageReadinessIfNeeded() {
+            let pending = Array(deferredCoverageReadiness.values)
+            deferredCoverageReadiness.removeAll(keepingCapacity: true)
+            coverageReadinessDrain.append(contentsOf: pending)
+            scheduleNextCoverageReadinessDrain()
+        }
+
+        private func scheduleNextCoverageReadinessDrain() {
+            guard !isDismantled,
+                  !coverageReadinessDrainScheduled,
+                  !coverageReadinessDrain.isEmpty else { return }
+            coverageReadinessDrainScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.coverageReadinessDrainScheduled = false
+                guard !self.isDismantled,
+                      !self.coverageReadinessDrain.isEmpty else { return }
+                let next = self.coverageReadinessDrain.removeFirst()
+                next()
+                self.scheduleNextCoverageReadinessDrain()
+            }
         }
         // MARK: - Scale
 
@@ -1940,7 +2931,19 @@ struct MapViewRepresentable: UIViewRepresentable {
         func syncBasemap(on mapView: MKMapView) {
             switch basemapChoice {
             case .districtsOffline:
-                syncOnlineBristolBaySatelliteBasemap(on: mapView)
+                // Apple Satellite remains the broad backing map. The Bristol Bay
+                // imagery is inserted above it but below every downloaded district
+                // overlay, so it fills its coverage area without hiding district maps.
+                let hasOfflineBristol = !OfflineMapsManager.shared
+                    .localBristolBaySatellitePackages().isEmpty
+                switch BasemapLayerPolicy.districtBristolSource(
+                    hasDownloadedOfflinePackage: hasOfflineBristol
+                ) {
+                case .downloadedOffline:
+                    syncOfflineBristolBaySatelliteBasemap(on: mapView)
+                case .onlineFallback:
+                    syncOnlineBristolBaySatelliteBasemap(on: mapView)
+                }
 
             case .appleSatellite:
                 if mapView.mapType != .satellite {
@@ -1948,7 +2951,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 }
                 removeNOAABasemap(from: mapView)
 
-            case .bristolBaySatelliteOnline:
+            case .districtsOnline:
                 syncOnlineBristolBaySatelliteBasemap(on: mapView)
 
             case .bristolBaySatelliteOffline:
@@ -1963,6 +2966,131 @@ struct MapViewRepresentable: UIViewRepresentable {
             case .noaaOnline:
                 syncOnlineNOAABasemap(on: mapView)
             }
+            syncOnlineDistrictMaps(on: mapView)
+        }
+
+        private func syncOnlineDistrictMaps(on mapView: MKMapView) {
+            let desired = basemapChoice == .districtsOnline
+                ? OnlineDistrictMapCatalog.selectedMaps(version: currentSelectedMapVersion)
+                : []
+            let wantedSlugs = Set(desired.map { $0.pack.slug })
+            for slug in Array(onlineDistrictOverlays.keys) where !wantedSlugs.contains(slug) {
+                guard let overlay = onlineDistrictOverlays.removeValue(forKey: slug) else { continue }
+                discardRenderer(for: overlay)
+                mapView.removeOverlay(overlay)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+            }
+            for source in desired where onlineDistrictOverlays[source.pack.slug] == nil {
+                let overlay = OnlineDistrictTileOverlay(source: source)
+                onlineDistrictOverlays[source.pack.slug] = overlay
+                MapStabilityDiagnostics.shared.increment(.overlayAddition)
+                if let basemap = noaaBasemapOverlay {
+                    mapView.insertOverlay(overlay, above: basemap)
+                } else {
+                    mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
+                }
+            }
+        }
+
+        func updateMBTilesViewportHints(
+            _ mapView: MKMapView,
+            allowPrefetch: Bool = true,
+            commitGeneration: Bool = true
+        ) {
+            let zoom = zoomLevel(for: mapView)
+            let center = mapView.centerCoordinate
+            if allowPrefetch {
+                for continuity in activeRasterContinuities(on: mapView) {
+                    continuity.prepare(in: mapView.visibleMapRect, zoom: Int(zoom.rounded()))
+                }
+            }
+            var updatedSessions: Set<ObjectIdentifier> = []
+
+            func update(_ overlay: MKTileOverlay?) {
+                guard let overlay = overlay as? MBTilesOverlay else { return }
+                let sessionID = ObjectIdentifier(overlay.packageSession)
+                guard updatedSessions.insert(sessionID).inserted else { return }
+                overlay.updateViewport(
+                    zoomLevel: zoom,
+                    centerCoordinate: center,
+                    commitGeneration: commitGeneration
+                )
+            }
+
+            installedMBTilesOverlays.values.forEach { update($0) }
+            update(noaaBasemapOverlay)
+            update(pendingBasemapPredecessor)
+
+            if allowPrefetch {
+                let basemapCandidates = [noaaBasemapOverlay, pendingBasemapPredecessor]
+                    .compactMap { $0 }
+                var prefetchedBasemapBackstops: Set<ObjectIdentifier> = []
+                for basemap in basemapCandidates {
+                    guard let backstop = basemapBackstopByOverlayID[ObjectIdentifier(basemap)],
+                          prefetchedBasemapBackstops.insert(ObjectIdentifier(backstop)).inserted,
+                          zoom >= backstop.minimumDisplayZoom else { continue }
+                    backstop.prefetch(in: mapView.visibleMapRect)
+                }
+            }
+
+            guard allowPrefetch, basemapChoice == .districtsOffline else {
+                if basemapChoice != .districtsOffline {
+                    lastMBTilesViewportZoom = nil
+                    lastMBTilesPrefetchAnchor = nil
+                    lastMBTilesPrefetchZooms = []
+                    lastMBTilesPrefetchIdentities = []
+                }
+                return
+            }
+            let zoomDirection = lastMBTilesViewportZoom.map { zoom - $0 } ?? 0
+            lastMBTilesViewportZoom = zoom
+            let currentZoom = Int(zoom.rounded())
+            let approachingZoom = zoomDirection < -0.01 ? currentZoom - 1 : currentZoom + 1
+            let prefetchZooms = Array(Set([currentZoom, approachingZoom])).sorted()
+            let continuityEntries = installedMBTilesOverlays.filter {
+                $0.key.role == .district || $0.key.role == .shoreline
+            }
+            let identities = Set(continuityEntries.map(\.key))
+            guard !continuityEntries.isEmpty,
+                  let anchor = MBTilesViewportTilePlanner.coordinates(
+                    in: mapView.visibleMapRect,
+                    zoom: currentZoom,
+                    ring: 0,
+                    maximumCount: 1
+                  ).first else { return }
+            guard anchor != lastMBTilesPrefetchAnchor
+                    || prefetchZooms != lastMBTilesPrefetchZooms
+                    || identities != lastMBTilesPrefetchIdentities else { return }
+            lastMBTilesPrefetchAnchor = anchor
+            lastMBTilesPrefetchZooms = prefetchZooms
+            lastMBTilesPrefetchIdentities = identities
+
+            for (identity, overlay) in continuityEntries {
+                if overlay.hasServedRealTile {
+                    overlay.prefetch(in: mapView.visibleMapRect, zoomLevels: prefetchZooms)
+                }
+                if let backstop = districtBackstopOverlays[identity],
+                   zoom >= backstop.minimumDisplayZoom {
+                    backstop.prefetch(in: mapView.visibleMapRect)
+                }
+            }
+        }
+
+        private func setRasterCameraMovementActive(_ active: Bool) {
+            for renderer in rendererByOverlayID.values {
+                (renderer as? RasterContinuityRenderer)?.setCameraMovementActive(active)
+            }
+        }
+
+        private func activeRasterContinuities(on mapView: MKMapView) -> [RasterMapContinuity] {
+            mapView.overlays.compactMap { overlay in
+                if let backstop = overlay as? DistrictMapBackstopOverlay, backstop.isActive {
+                    return backstop.continuity
+                }
+                if let online = overlay as? OnlineDistrictTileOverlay { return online.continuity }
+                if let bay = overlay as? BristolBaySatelliteTileOverlay { return bay.continuity }
+                return nil
+            }
         }
 
         private func syncOnlineBristolBaySatelliteBasemap(on mapView: MKMapView) {
@@ -1970,17 +3098,23 @@ struct MapViewRepresentable: UIViewRepresentable {
                 mapView.mapType = .satellite
             }
 
-            let wantedKey = "bristol-bay-satellite:online-overlay"
+            // District mode can zoom to 17. Keep the Bristol Bay layer present at
+            // those levels by overzooming its native zoom-15 imagery, matching the
+            // fixed-detail behavior of the downloaded district maps.
+            let displayMaximumZ = basemapChoice == .districtsOffline
+                ? extendedOfflineMaxZForTiles
+                : maxZForTiles
+            let wantedKey = "bristol-bay-satellite:online-overlay:z\(displayMaximumZ)"
             if noaaBasemapKey == wantedKey, noaaBasemapOverlay != nil {
                 return
             }
 
-            removeNOAABasemap(from: mapView)
-
-            let overlay = BristolBaySatelliteTileOverlay(replacesMapContent: false)
-            mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
-            noaaBasemapOverlay = overlay
-            noaaBasemapKey = wantedKey
+            let overlay = BristolBaySatelliteTileOverlay(
+                replacesMapContent: false,
+                displayMaximumZ: displayMaximumZ
+            )
+            insertBasemapOverlay(overlay, on: mapView)
+            adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: false, on: mapView)
         }
 
         private func syncOfflineBristolBaySatelliteBasemap(on mapView: MKMapView) {
@@ -1992,28 +3126,55 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return
             }
 
+            // Apple Satellite remains the worldwide backing surface. Precise MBTiles
+            // bounds keep this downloaded Bristol Bay raster confined to its coverage.
             if mapView.mapType != .satellite {
                 mapView.mapType = .satellite
             }
 
-            let wantedKey = "bristol-bay-satellite:offline:\(package.slug)"
+            let packageVersion = OfflineMapsManager.shared.installedVersionIdentity(for: package.url)
+                ?? package.url.deletingLastPathComponent().lastPathComponent
+            let wantedKey = "bristol-bay-satellite:offline:\(package.url.standardizedFileURL.path):\(packageVersion)"
             if noaaBasemapKey == wantedKey, noaaBasemapOverlay != nil {
                 return
             }
 
-            removeNOAABasemap(from: mapView)
-
+            let minimumZoom = package.minZoom ?? 0
+            let nativeMaximumZoom = max(
+                minimumZoom,
+                min(maxZForTiles, package.maxZoom ?? maxZForTiles)
+            )
             let overlay = MBTilesOverlay(
                 mbtilesURL: package.url,
                 slug: package.slug,
-                canReplaceMapContent: false
+                packageVersion: packageVersion,
+                role: .basemap,
+                storageSchemeOverride: package.storageScheme,
+                minimumZoom: minimumZoom,
+                // The camera remains free to reach z17, but native z15 parents are
+                // drawn by the continuity renderer instead of manufacturing 4/16
+                // encoded children for every downloaded Bristol Bay tile.
+                maximumZoom: nativeMaximumZoom,
+                tileSizePixels: package.tileWidth,
+                maximumFallbackDepth: 6,
+                canReplaceMapContent: false,
+                nativeDetailMaximumZ: nativeMaximumZoom,
+                coverageMapRect: package.coverageMapRect,
+                immutableFile: OfflineMapsManager.shared.isImmutableInstalledURL(package.url)
             )
-            overlay.minimumZ = package.minZoom ?? 0
-            overlay.maximumZ = maxZForTiles
-
-            mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
-            noaaBasemapOverlay = overlay
-            noaaBasemapKey = wantedKey
+            overlay.rendersThroughBackstop = true
+            insertBasemapOverlay(overlay, on: mapView)
+            let backstop = DistrictMapBackstopOverlay(
+                slug: package.slug,
+                identity: overlay.identity,
+                packageSession: overlay.packageSession,
+                boundingMapRect: package.coverageMapRect
+            )
+            backstop.activate()
+            basemapBackstopByOverlayID[ObjectIdentifier(overlay)] = backstop
+            mapView.insertOverlay(backstop, below: overlay)
+            MapStabilityDiagnostics.shared.increment(.overlayAddition)
+            adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: true, on: mapView)
         }
 
 
@@ -2027,12 +3188,9 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return
             }
 
-            removeNOAABasemap(from: mapView)
-
             let overlay = USGSTopoOnlineTileOverlay(replacesMapContent: true)
-            mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
-            noaaBasemapOverlay = overlay
-            noaaBasemapKey = wantedKey
+            insertBasemapOverlay(overlay, on: mapView)
+            adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: false, on: mapView)
         }
 
         private func syncOfflineNOAABasemap(on mapView: MKMapView) {
@@ -2048,24 +3206,28 @@ struct MapViewRepresentable: UIViewRepresentable {
                 mapView.mapType = .satellite
             }
 
-            let wantedKey = "offline:\(package.slug)"
+            let packageVersion = OfflineMapsManager.shared.installedVersionIdentity(for: package.url)
+                ?? package.url.deletingLastPathComponent().lastPathComponent
+            let wantedKey = "offline:\(package.url.standardizedFileURL.path):\(packageVersion)"
             if noaaBasemapKey == wantedKey, noaaBasemapOverlay != nil {
                 return
             }
 
-            removeNOAABasemap(from: mapView)
-
             let overlay = MBTilesOverlay(
                 mbtilesURL: package.url,
                 slug: package.slug,
-                canReplaceMapContent: false
+                packageVersion: packageVersion,
+                role: .basemap,
+                storageSchemeOverride: package.storageScheme,
+                minimumZoom: package.minZoom ?? 0,
+                maximumZoom: package.maxZoom ?? 18,
+                tileSizePixels: package.tileWidth,
+                canReplaceMapContent: false,
+                coverageMapRect: package.coverageMapRect,
+                immutableFile: OfflineMapsManager.shared.isImmutableInstalledURL(package.url)
             )
-            overlay.minimumZ = package.minZoom ?? 0
-            overlay.maximumZ = package.maxZoom ?? 18
-
-            mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
-            noaaBasemapOverlay = overlay
-            noaaBasemapKey = wantedKey
+            insertBasemapOverlay(overlay, on: mapView)
+            adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: true, on: mapView)
         }
 
         private func syncOnlineNOAABasemap(on mapView: MKMapView) {
@@ -2078,19 +3240,246 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return
             }
 
-            removeNOAABasemap(from: mapView)
+            // NOAA chart tiles contain transparent water/background pixels. Keeping
+            // MapKit's standard surface alive prevents those pixels from becoming
+            // black or briefly exposing an unrelated replacement surface.
+            let overlay = NOAAOnlineTileOverlay(replacesMapContent: false)
+            insertBasemapOverlay(overlay, on: mapView)
+            adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: false, on: mapView)
+        }
 
-            let overlay = NOAAOnlineTileOverlay(replacesMapContent: true)
-            mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
-            noaaBasemapOverlay = overlay
-            noaaBasemapKey = wantedKey
+        private func insertBasemapOverlay(_ overlay: MKTileOverlay, on mapView: MKMapView) {
+            if let current = noaaBasemapOverlay {
+                mapView.insertOverlay(overlay, above: current)
+            } else {
+                mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
+            }
+            MapStabilityDiagnostics.shared.increment(.overlayAddition)
+        }
+
+        private func adoptAttachedBasemap(
+            _ replacement: MKTileOverlay,
+            key: String,
+            waitForFirstTile: Bool,
+            on mapView: MKMapView
+        ) {
+            let lastKnownGood = pendingBasemapPredecessor ?? noaaBasemapOverlay
+            if let superseded = noaaBasemapOverlay,
+               superseded !== lastKnownGood,
+               superseded !== replacement {
+                removeBasemapOverlay(superseded, from: mapView)
+            }
+            pendingBasemapPredecessor = nil
+            noaaBasemapOverlay = replacement
+            noaaBasemapKey = key
+
+            guard waitForFirstTile,
+                  let replacement = replacement as? MBTilesOverlay,
+                  let lastKnownGood,
+                  lastKnownGood !== replacement else {
+                if let lastKnownGood, lastKnownGood !== replacement {
+                    removeBasemapOverlay(lastKnownGood, from: mapView)
+                }
+                return
+            }
+
+            pendingBasemapPredecessor = lastKnownGood
+            let retirePredecessor = { [weak self, weak mapView, weak replacement] in
+                DispatchQueue.main.async {
+                    guard let self, let mapView, let replacement,
+                          self.mapView === mapView,
+                          self.noaaBasemapOverlay === replacement else { return }
+                    if let predecessor = self.pendingBasemapPredecessor {
+                        self.removeBasemapOverlay(predecessor, from: mapView)
+                    }
+                    self.pendingBasemapPredecessor = nil
+                    #if DEBUG
+                    os_log(.info, "Activated ready offline basemap %{public}@", replacement.identity.description)
+                    #endif
+                }
+            }
+            if let backstop = basemapBackstopByOverlayID[ObjectIdentifier(replacement)] {
+                retireAfterCurrentVisibleCoverageIsReady(
+                    backstop: backstop,
+                    on: mapView,
+                    stillValid: { [weak self, weak replacement] in
+                        guard let self, let replacement else { return false }
+                        return self.noaaBasemapOverlay === replacement
+                    },
+                    completion: retirePredecessor
+                )
+                return
+            }
+            replacement.whenFirstTileIsReady(retirePredecessor)
+        }
+
+        /// A replacement retires its known-good predecessor only when every tile
+        /// needed for the *current* viewport is terminal: ordinary pyramid tiles at
+        /// lower scales and native parents while overzoomed. Camera changes restart
+        /// the check so an obsolete readiness snapshot cannot expose a partial layer.
+        func retireAfterCurrentVisibleCoverageIsReady(
+            backstop: DistrictMapBackstopOverlay,
+            on mapView: MKMapView,
+            stillValid: @escaping () -> Bool,
+            completion: @escaping () -> Void
+        ) {
+            prepareCurrentVisibleCoverage(
+                backstop: backstop,
+                on: mapView,
+                attempt: 0,
+                maximumAttempts: 12,
+                stillValid: stillValid,
+                completion: completion
+            )
+        }
+
+        private func prepareCurrentVisibleCoverage(
+            backstop: DistrictMapBackstopOverlay,
+            on mapView: MKMapView,
+            attempt: Int,
+            maximumAttempts: Int,
+            stillValid: @escaping () -> Bool,
+            completion: @escaping () -> Void
+        ) {
+            let readinessKey = ObjectIdentifier(backstop)
+            guard self.mapView === mapView, stillValid() else {
+                deferredCoverageReadiness.removeValue(forKey: readinessKey)
+                return
+            }
+            // A readiness snapshot taken while the camera is moving is obsolete by
+            // definition. Wait for the same quiet period used by the camera commit;
+            // this keeps a replacement overlay from launching hundreds of requests
+            // for a footprint that has already moved away.
+            guard !isCameraMovementActive else {
+                deferredCoverageReadiness[readinessKey] = {
+                    [weak self, weak mapView, weak backstop] in
+                    guard let self, let mapView, let backstop else { return }
+                    self.prepareCurrentVisibleCoverage(
+                        backstop: backstop,
+                        on: mapView,
+                        attempt: attempt,
+                        maximumAttempts: maximumAttempts,
+                        stillValid: stillValid,
+                        completion: completion
+                    )
+                }
+                return
+            }
+            deferredCoverageReadiness.removeValue(forKey: readinessKey)
+            let mapZoom = Darwin.log2(
+                MKMapSize.world.width
+                    / (256.0 * (mapView.visibleMapRect.width / Double(max(mapView.bounds.width, 1))))
+            )
+            let readinessZoom = mapZoom >= backstop.minimumDisplayZoom
+                ? backstop.nativeZoom
+                : min(
+                    backstop.identity.maximumZoom,
+                    max(backstop.identity.minimumZoom, Int(mapZoom.rounded()))
+                )
+            let expectedCoordinates = Set(
+                backstop.visibleCoordinates(
+                    in: mapView.visibleMapRect,
+                    zoom: readinessZoom
+                )
+            )
+            backstop.prepareVisibleCoverageReadiness(
+                in: mapView.visibleMapRect,
+                zoom: readinessZoom
+            ) {
+                [weak self, weak mapView] readiness in
+                DispatchQueue.main.async {
+                    guard let self, let mapView,
+                          self.mapView === mapView,
+                          stillValid() else { return }
+                    // A result launched for the settled camera cannot retire the
+                    // last-known-good layer after a new gesture has begun, even when
+                    // that gesture remains inside the same tile-coordinate set.
+                    if self.isCameraMovementActive {
+                        self.prepareCurrentVisibleCoverage(
+                            backstop: backstop,
+                            on: mapView,
+                            attempt: attempt,
+                            maximumAttempts: maximumAttempts,
+                            stillValid: stillValid,
+                            completion: completion
+                        )
+                        return
+                    }
+                    let currentMapZoom = Darwin.log2(
+                        MKMapSize.world.width
+                            / (256.0 * (mapView.visibleMapRect.width / Double(max(mapView.bounds.width, 1))))
+                    )
+                    let currentReadinessZoom = currentMapZoom >= backstop.minimumDisplayZoom
+                        ? backstop.nativeZoom
+                        : min(
+                            backstop.identity.maximumZoom,
+                            max(backstop.identity.minimumZoom, Int(currentMapZoom.rounded()))
+                        )
+                    let currentCoordinates = Set(
+                        backstop.visibleCoordinates(
+                            in: mapView.visibleMapRect,
+                            zoom: currentReadinessZoom
+                        )
+                    )
+                    if currentReadinessZoom != readinessZoom
+                        || currentCoordinates != expectedCoordinates {
+                        self.prepareCurrentVisibleCoverage(
+                            backstop: backstop,
+                            on: mapView,
+                            attempt: attempt,
+                            maximumAttempts: maximumAttempts,
+                            stillValid: stillValid,
+                            completion: completion
+                        )
+                    } else if readiness.isReady {
+                        completion()
+                    } else if attempt + 1 < maximumAttempts {
+                        // Retry transient queue/SQLite failures without requiring a
+                        // camera gesture. Exponential backoff is capped so the chain
+                        // remains responsive but cannot become a hot retry loop.
+                        let retryDelay = min(
+                            2.0,
+                            0.10 * pow(2.0, Double(attempt))
+                        )
+                        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self, weak mapView] in
+                            guard let self, let mapView else { return }
+                            self.prepareCurrentVisibleCoverage(
+                                backstop: backstop,
+                                on: mapView,
+                                attempt: attempt + 1,
+                                maximumAttempts: maximumAttempts,
+                                stillValid: stillValid,
+                                completion: completion
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        private func removeBasemapOverlay(_ overlay: MKTileOverlay, from mapView: MKMapView) {
+            discardRenderer(for: overlay)
+            mapView.removeOverlay(overlay)
+            MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+            if let backstop = basemapBackstopByOverlayID.removeValue(
+                forKey: ObjectIdentifier(overlay)
+            ) {
+                discardRenderer(for: backstop)
+                mapView.removeOverlay(backstop)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
+            }
         }
 
         private func removeNOAABasemap(from mapView: MKMapView) {
             if let overlay = noaaBasemapOverlay {
-                mapView.removeOverlay(overlay)
+                removeBasemapOverlay(overlay, from: mapView)
+            }
+            if let predecessor = pendingBasemapPredecessor,
+               predecessor !== noaaBasemapOverlay {
+                removeBasemapOverlay(predecessor, from: mapView)
             }
             noaaBasemapOverlay = nil
+            pendingBasemapPredecessor = nil
             noaaBasemapKey = nil
         }
 
@@ -2103,9 +3492,12 @@ struct MapViewRepresentable: UIViewRepresentable {
 
             let center = mapView.centerCoordinate
             let clampedRect = mapRect(center: center, zoom: maximumZoom, in: mapView)
-            withProgrammaticRegionChange(timeout: 0.6) {
-                mapView.setVisibleMapRect(clampedRect, animated: false)
-            }
+            setVisibleMapRectIfNeeded(
+                clampedRect,
+                on: mapView,
+                animated: false,
+                timeout: 0.6
+            )
         }
 
         private func zoomLevel(for mapView: MKMapView) -> Double {
@@ -2152,9 +3544,12 @@ struct MapViewRepresentable: UIViewRepresentable {
             if !didLaunchCenter {
                 didLaunchCenter = true
                 let rect = mapRect(center: loc.coordinate, zoom: initialLaunchZoom, in: mapView)
-                withProgrammaticRegionChange(timeout: 1.2) {
-                    mapView.setVisibleMapRect(rect, animated: false)
-                }
+                setVisibleMapRectIfNeeded(
+                    rect,
+                    on: mapView,
+                    animated: false,
+                    timeout: 1.2
+                )
             }
 
             // Follow behavior (GPS tick):
@@ -2180,9 +3575,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                     if shouldMove {
                         lastFollowCenter = now
                         lastCameraCenterCoord = target
-                        withProgrammaticRegionChange {
-                            mapView.setCenter(target, animated: true)
-                        }
+                        setCenterIfNeeded(target, on: mapView, animated: true)
                     }
                 }
             }
@@ -2284,7 +3677,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         private func replaceNearestBoundaryHighlight(with segment: MKPolyline?, in mapView: MKMapView) {
             if let old = nearestBoundaryHighlightSegment {
+                discardRenderer(for: old)
                 mapView.removeOverlay(old)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
 
             nearestBoundaryHighlightSegment = nil
@@ -2292,11 +3687,14 @@ struct MapViewRepresentable: UIViewRepresentable {
             guard let segment else { return }
             nearestBoundaryHighlightSegment = segment
             mapView.addOverlay(segment, level: .aboveLabels)
+            MapStabilityDiagnostics.shared.increment(.overlayAddition)
         }
 
         private func removeNearestBoundaryHighlight(from mapView: MKMapView) {
             if let old = nearestBoundaryHighlightSegment {
+                discardRenderer(for: old)
                 mapView.removeOverlay(old)
+                MapStabilityDiagnostics.shared.increment(.overlayRemoval)
                 nearestBoundaryHighlightSegment = nil
             }
         }
@@ -2583,20 +3981,66 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // MARK: - Renderers
 
+        @discardableResult
+        private func retainRenderer(
+            _ renderer: MKOverlayRenderer,
+            for overlayID: ObjectIdentifier
+        ) -> MKOverlayRenderer {
+            rendererCreationCount += 1
+            MapStabilityDiagnostics.shared.increment(.rendererCreation)
+            rendererByOverlayID[overlayID] = renderer
+            return renderer
+        }
+
+        func discardRenderer(for overlay: MKOverlay) {
+            guard let renderer = rendererByOverlayID.removeValue(
+                forKey: ObjectIdentifier(overlay as AnyObject)
+            ) else { return }
+            rendererOpacityController.retire(renderer)
+        }
+
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+
+            let overlayID = ObjectIdentifier(overlay as AnyObject)
+            if let existing = rendererByOverlayID[overlayID] {
+                return existing
+            }
+
+            if let backstop = overlay as? DistrictMapBackstopOverlay {
+                let renderer = DistrictMapBackstopRenderer(overlay: backstop)
+                renderer.setCameraMovementActive(isCameraMovementActive)
+                backstop.continuity.prepare(in: mapView.visibleMapRect, zoom: Int(zoomLevel(for: mapView).rounded()))
+                _ = rendererOpacityController.apply(tileAlpha(for: backstop.slug), to: renderer)
+                return retainRenderer(renderer, for: overlayID)
+            }
+
+            if let continuity = (overlay as? OnlineDistrictTileOverlay)?.continuity
+                ?? (overlay as? BristolBaySatelliteTileOverlay)?.continuity {
+                let renderer = RasterContinuityRenderer(overlay: overlay, continuity: continuity)
+                renderer.setCameraMovementActive(isCameraMovementActive)
+                continuity.prepare(in: mapView.visibleMapRect, zoom: Int(zoomLevel(for: mapView).rounded()))
+                _ = rendererOpacityController.apply(1.0, to: renderer)
+                return retainRenderer(renderer, for: overlayID)
+            }
+
+            if let source = overlay as? MBTilesOverlay, source.rendersThroughBackstop {
+                // Drawing the ordinary tile renderer over the retained renderer
+                // doubles translucent edge pixels and reintroduces zoom flashes.
+                return retainRenderer(MKOverlayRenderer(overlay: source), for: overlayID)
+            }
 
             if let tile = overlay as? MKTileOverlay {
                 let r = MKTileOverlayRenderer(tileOverlay: tile)
 
                 if tile is SeaSurfaceTemperatureOverlay {
-                    r.alpha = CGFloat(max(0.0, min(1.0, currentSSTOpacity)))
+                    _ = rendererOpacityController.apply(CGFloat(currentSSTOpacity), to: r)
                 } else if let mb = tile as? MBTilesOverlay {
-                    r.alpha = tileAlpha(for: mb.slug)
+                    _ = rendererOpacityController.apply(tileAlpha(for: mb.slug), to: r)
                 } else {
-                    r.alpha = 1.0
+                    _ = rendererOpacityController.apply(1.0, to: r)
                 }
 
-                return r
+                return retainRenderer(r, for: overlayID)
             }
 
             if let line = overlay as? MKPolyline,
@@ -2607,7 +4051,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 r.lineWidth = 2.0
                 r.lineCap = .round
                 r.lineJoin = .round
-                return r
+                return retainRenderer(r, for: overlayID)
             }
 
             if let line = overlay as? MKPolyline,
@@ -2617,7 +4061,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 r.lineWidth = 2.2
                 r.lineCap = .round
                 r.lineJoin = .round
-                return r
+                return retainRenderer(r, for: overlayID)
             }
 
             if let line = overlay as? MKPolyline,
@@ -2627,7 +4071,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 r.strokeColor = UIColor.systemTeal.withAlphaComponent(0.95)
                 r.lineWidth = 2.5
                 r.lineDashPattern = [6, 4]
-                return r
+                return retainRenderer(r, for: overlayID)
             }
 
             if let line = overlay as? MKPolyline {
@@ -2643,10 +4087,10 @@ struct MapViewRepresentable: UIViewRepresentable {
                     r.lineWidth = 2
                 }
 
-                return r
+                return retainRenderer(r, for: overlayID)
             }
 
-            return MKOverlayRenderer(overlay: overlay)
+            return retainRenderer(MKOverlayRenderer(overlay: overlay), for: overlayID)
         }
     }
 }

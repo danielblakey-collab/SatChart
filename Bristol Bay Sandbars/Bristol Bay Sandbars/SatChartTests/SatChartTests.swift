@@ -8,11 +8,15 @@
 import Testing
 import Foundation
 import CoreLocation
+import CoreImage
+import MapKit
+import UIKit
 import FirebaseFirestore
 import SwiftUI
 @testable import SatChart
 
 struct SatChartTests {
+    @MainActor private static var retainedMapViews: [MKMapView] = []
 
     @Test func bundledOfflineDatabaseResourceCanBeOpened() throws {
         let url = OfflineDatabaseResource.bundledSQLiteURL()
@@ -26,9 +30,166 @@ struct SatChartTests {
     }
 
     @Test func basemapDefaultPrefersBristolBaySatelliteOnline() {
-        #expect(BasemapDefaultPolicy.choice(rawValue: "", didMigrate: false).rawValue == BasemapChoice.bristolBaySatelliteOnline.rawValue)
-        #expect(BasemapDefaultPolicy.choice(rawValue: BasemapChoice.appleSatellite.rawValue, didMigrate: false).rawValue == BasemapChoice.bristolBaySatelliteOnline.rawValue)
+        #expect(BasemapDefaultPolicy.choice(rawValue: "", didMigrate: false).rawValue == BasemapChoice.districtsOnline.rawValue)
+        #expect(BasemapDefaultPolicy.choice(rawValue: BasemapChoice.appleSatellite.rawValue, didMigrate: false).rawValue == BasemapChoice.districtsOnline.rawValue)
         #expect(BasemapDefaultPolicy.choice(rawValue: BasemapChoice.districtsOffline.rawValue, didMigrate: true).rawValue == BasemapChoice.districtsOffline.rawValue)
+    }
+
+    @Test func missingMBTilesSchemeUsesDocumentedLegacyTMSDefault() throws {
+        #expect(try MBTilesStorageScheme.metadataValue(nil) == .tms)
+        #expect(try MBTilesStorageScheme.metadataValue("") == .tms)
+        #expect(try MBTilesStorageScheme.metadataValue("xyz") == .xyz)
+        #expect(MBTilesStorageScheme.explicitLegacyOverride(forPackageSlug: "egegik_v2") == .xyz)
+        #expect(MBTilesStorageScheme.explicitLegacyOverride(forPackageSlug: "egegik_v3") == nil)
+    }
+
+    @MainActor
+    @Test func districtSatelliteBackingLayerSupportsExtendedDisplayZoom() {
+        let standard = BristolBaySatelliteTileOverlay()
+        let extended = BristolBaySatelliteTileOverlay(displayMaximumZ: 17)
+
+        #expect(standard.maximumZ == 15)
+        #expect(extended.maximumZ == 17)
+    }
+
+    @MainActor
+    @Test func rasterTilesCanOverzoomTwoLevelsWithoutNewDetail() throws {
+        let rendererFormat = UIGraphicsImageRendererFormat.default()
+        rendererFormat.scale = 1
+        let sourceImage = UIGraphicsImageRenderer(
+            size: CGSize(width: 256, height: 256),
+            format: rendererFormat
+        ).image {
+            UIColor.red.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+            UIColor.green.setFill()
+            $0.fill(CGRect(x: 128, y: 0, width: 128, height: 128))
+            UIColor.blue.setFill()
+            $0.fill(CGRect(x: 0, y: 128, width: 128, height: 128))
+            UIColor.yellow.setFill()
+            $0.fill(CGRect(x: 128, y: 128, width: 128, height: 128))
+        }
+        let sourceData = try #require(sourceImage.pngData())
+        let format = try #require(MBTilesOverlay.rasterTileFormat(for: sourceData))
+
+        for childScale in [2, 4] {
+            let children = try [
+                (0, 0, [UInt8(255), 0, 0]),
+                (childScale - 1, 0, [0, UInt8(255), 0]),
+                (0, childScale - 1, [0, 0, UInt8(255)]),
+                (childScale - 1, childScale - 1, [UInt8(255), UInt8(255), 0])
+            ].map { childX, childY, expectedRGB in
+                let outputData = try #require(MBTilesOverlay.overzoomedTileData(
+                    from: sourceData,
+                    childX: childX,
+                    childY: childY,
+                    childScale: childScale,
+                    format: format
+                ))
+                let outputImage = try #require(UIImage(data: outputData))
+                #expect(outputImage.cgImage?.width == 256)
+                #expect(outputImage.cgImage?.height == 256)
+                return (outputImage, expectedRGB)
+            }
+
+            for (outputImage, expectedRGB) in children {
+                let actualRGB = try Self.averageRGB(of: outputImage)
+                #expect(abs(Int(actualRGB[0]) - Int(expectedRGB[0])) <= 2)
+                #expect(abs(Int(actualRGB[1]) - Int(expectedRGB[1])) <= 2)
+                #expect(abs(Int(actualRGB[2]) - Int(expectedRGB[2])) <= 2)
+            }
+        }
+    }
+
+    @MainActor
+    @Test func overzoomedRasterChildrenPreserveTopToBottomOrientation() throws {
+        let rendererFormat = UIGraphicsImageRendererFormat.default()
+        rendererFormat.scale = 1
+        let sourceImage = UIGraphicsImageRenderer(
+            size: CGSize(width: 256, height: 256),
+            format: rendererFormat
+        ).image {
+            for (index, color) in [UIColor.red, .green, .blue, .yellow].enumerated() {
+                color.setFill()
+                $0.fill(CGRect(x: 0, y: index * 64, width: 256, height: 64))
+            }
+        }
+        let sourceData = try #require(sourceImage.pngData())
+        let format = try #require(MBTilesOverlay.rasterTileFormat(for: sourceData))
+
+        let upperData = try #require(MBTilesOverlay.overzoomedTileData(
+            from: sourceData,
+            childX: 0,
+            childY: 0,
+            childScale: 2,
+            format: format
+        ))
+        let lowerData = try #require(MBTilesOverlay.overzoomedTileData(
+            from: sourceData,
+            childX: 0,
+            childY: 1,
+            childScale: 2,
+            format: format
+        ))
+        let upper = try #require(UIImage(data: upperData))
+        let lower = try #require(UIImage(data: lowerData))
+
+        let upperTop = try Self.averageRGB(of: upper, normalizedY: 0.15)
+        let upperBottom = try Self.averageRGB(of: upper, normalizedY: 0.85)
+        let lowerTop = try Self.averageRGB(of: lower, normalizedY: 0.15)
+        let lowerBottom = try Self.averageRGB(of: lower, normalizedY: 0.85)
+        #expect(upperTop == [255, 0, 0])
+        #expect(upperBottom == [0, 255, 0])
+        #expect(lowerTop == [0, 0, 255])
+        #expect(lowerBottom == [255, 255, 0])
+    }
+
+    @MainActor
+    private static func averageRGB(of image: UIImage) throws -> [UInt8] {
+        let inputImage = try #require(CIImage(image: image))
+        let filter = try #require(CIFilter(name: "CIAreaAverage"))
+        filter.setValue(inputImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: inputImage.extent), forKey: kCIInputExtentKey)
+        let outputImage = try #require(filter.outputImage)
+
+        var bytes = [UInt8](repeating: 0, count: 4)
+        CIContext(options: [.cacheIntermediates: false]).render(
+            outputImage,
+            toBitmap: &bytes,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        )
+        return Array(bytes.prefix(3))
+    }
+
+    @MainActor
+    private static func averageRGB(of image: UIImage, normalizedY: CGFloat) throws -> [UInt8] {
+        let inputImage = try #require(CIImage(image: image))
+        let sampleY = inputImage.extent.minY
+            + (1 - normalizedY) * inputImage.extent.height
+        let sampleRect = CGRect(
+            x: inputImage.extent.midX - 4,
+            y: sampleY - 4,
+            width: 8,
+            height: 8
+        )
+        let filter = try #require(CIFilter(name: "CIAreaAverage"))
+        filter.setValue(inputImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: sampleRect), forKey: kCIInputExtentKey)
+        let outputImage = try #require(filter.outputImage)
+
+        var bytes = [UInt8](repeating: 0, count: 4)
+        CIContext(options: [.cacheIntermediates: false]).render(
+            outputImage,
+            toBitmap: &bytes,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        )
+        return Array(bytes.prefix(3))
     }
 
     @MainActor
@@ -282,9 +443,17 @@ struct SatChartTests {
         #expect(store.seasons.first(where: { $0.calendarYear == 2022 })?.deliveryOpenings.count == 2)
     }
 
-    @Test func districtsOfflineShowsDistrictAndShorelineOverBristolBayOnlineBase() {
-        #expect(BasemapLayerPolicy.usesBristolBaySatelliteOnlineBase(.districtsOffline))
-        #expect(BasemapLayerPolicy.usesBristolBaySatelliteOnlineBase(.bristolBaySatelliteOnline))
+    @Test func districtsOfflineStacksDistrictsOverBristolBayAndAppleSatellite() {
+        #expect(BasemapLayerPolicy.usesAppleSatelliteBase(.districtsOffline))
+        #expect(BasemapLayerPolicy.usesAppleSatelliteBase(.appleSatellite))
+        #expect(!BasemapLayerPolicy.usesBristolBaySatelliteOnlineBase(.districtsOffline))
+        #expect(BasemapLayerPolicy.usesBristolBaySatelliteOnlineBase(.districtsOnline))
+        #expect(BasemapLayerPolicy.districtBristolSource(
+            hasDownloadedOfflinePackage: true
+        ) == .downloadedOffline)
+        #expect(BasemapLayerPolicy.districtBristolSource(
+            hasDownloadedOfflinePackage: false
+        ) == .onlineFallback)
 
         #expect(BasemapLayerPolicy.tileAlpha(
             for: "egegik_v2",
@@ -301,6 +470,65 @@ struct SatChartTests {
             basemapChoice: .districtsOffline,
             selectedDistrictMapSlug: nil
         ) == 1.0)
+    }
+
+    @MainActor
+    @Test func onlineDistrictsStackAboveBristolBayAndBelowOtherOverlays() {
+        let coordinator = MapViewRepresentable.Coordinator(
+            minZForTiles: 4,
+            maxZ: 15,
+            maxZForTiles: 15,
+            extendedOfflineMaxZ: 17,
+            extendedOfflineMaxZForTiles: 17,
+            initialLaunchZoom: 12,
+            initialCursorTrackingUser: true,
+            onDistanceText: { _ in },
+            onSpeedText: { _ in },
+            onMetersPerPoint: { _ in },
+            onFollowStateChanged: { _ in },
+            onCursorUpdated: { _, _, _ in },
+            onCursorTrackingStateChanged: { _ in },
+            onFishingSetDisplayPrompt: { _ in }
+        )
+        let mapView = MKMapView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        Self.retainedMapViews.append(mapView)
+        let downloadedDistrict = MKTileOverlay(urlTemplate: nil)
+        downloadedDistrict.canReplaceMapContent = false
+        mapView.mapType = .standard
+        mapView.addOverlay(downloadedDistrict, level: .aboveRoads)
+        coordinator.mapView = mapView
+        // Keep this renderer-order test independent of the device's downloaded-map
+        // inventory. Offline-vs-online selection is covered by the pure policy test.
+        coordinator.basemapChoice = .districtsOnline
+
+        coordinator.syncBasemap(on: mapView)
+
+        let rasters = mapView.overlays(in: .aboveRoads)
+        #expect(mapView.mapType == .satellite)
+        #expect(rasters.count == 3)
+        #expect(rasters.first is BristolBaySatelliteTileOverlay)
+        #expect((rasters[1] as? OnlineDistrictTileOverlay)?.source.pack.slug == "egegik_v4")
+        #expect((rasters.last as AnyObject) === downloadedDistrict)
+    }
+
+    @MainActor
+    @Test func everyDistrictV3ReplacementUsesDesiredSelectionNotTemporaryOverlayCount() {
+        let v3Packs = DistrictID.allCases.map { district in
+            OfflinePack(district: district, slug: district.packSlug(forVersion: 3))
+        }
+        let desiredSlugs = MapViewRepresentable.desiredDistrictMapSlugs(
+            from: v3Packs
+        )
+
+        for district in DistrictID.allCases {
+            let expectedSlug = district.packSlug(forVersion: 3)
+            #expect(desiredSlugs[district] == expectedSlug)
+            #expect(BasemapLayerPolicy.tileAlpha(
+                for: expectedSlug,
+                basemapChoice: .districtsOffline,
+                selectedDistrictMapSlug: desiredSlugs[district]
+            ) == 1.0)
+        }
     }
 
     @Test func nonDistrictBasemapsHideDistrictOfflineOverlays() {

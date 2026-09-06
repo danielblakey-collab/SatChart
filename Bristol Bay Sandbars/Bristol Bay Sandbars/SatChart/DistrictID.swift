@@ -40,8 +40,8 @@ enum DistrictID: String, CaseIterable, Identifiable {
     private var offlinePackVersions: [Int] {
         switch self {
         case .egegik:
-            // egegik_v3.mbtiles / egegik_v3.jpg are enabled here.
-            return [1, 2, 3]
+            // Published MBTiles and previews, including the new COG-derived variants.
+            return [1, 2, 3, 4, 5, 6, 7]
 
         case .ugashik:
             // ugashik_v3.mbtiles / ugashik_v3.jpg are enabled here.

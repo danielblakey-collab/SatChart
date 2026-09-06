@@ -1,13 +1,14 @@
 import Foundation
 import MapKit
-import SQLite3
 import CoreLocation
 import CryptoKit
+import ImageIO
+import UIKit
 
-enum BasemapChoice: String, CaseIterable, Identifiable {
+nonisolated enum BasemapChoice: String, CaseIterable, Identifiable {
     case districtsOffline
     case appleSatellite
-    case bristolBaySatelliteOnline
+    case districtsOnline = "bristolBaySatelliteOnline" // Preserve the saved basemap preference.
     case bristolBaySatelliteOffline
     case topoOnline
     case noaaOffline
@@ -19,7 +20,7 @@ enum BasemapChoice: String, CaseIterable, Identifiable {
         switch self {
         case .districtsOffline: return "Districts Offline"
         case .appleSatellite: return "Satellite"
-        case .bristolBaySatelliteOnline: return "B-Bay Sat. Online"
+        case .districtsOnline: return "Districts Online"
         case .bristolBaySatelliteOffline: return "B-Bay Sat Offline"
         case .topoOnline: return "USGS Topo"
         case .noaaOffline: return "NOAA Charts Offline"
@@ -33,7 +34,7 @@ enum BasemapChoice: String, CaseIterable, Identifiable {
             return "map.fill"
         case .appleSatellite:
             return "globe.americas.fill"
-        case .bristolBaySatelliteOnline:
+        case .districtsOnline:
             return "photo.fill"
         case .bristolBaySatelliteOffline:
             return "photo.stack.fill"
@@ -47,7 +48,7 @@ enum BasemapChoice: String, CaseIterable, Identifiable {
     }
 }
 
-enum BasemapDefaultPolicy {
+nonisolated enum BasemapDefaultPolicy {
     static func shouldPreferBristolBaySatelliteOnline(rawValue: String, didMigrate: Bool) -> Bool {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return !didMigrate && (trimmed.isEmpty || trimmed == BasemapChoice.appleSatellite.rawValue)
@@ -55,23 +56,49 @@ enum BasemapDefaultPolicy {
 
     static func choice(rawValue: String, didMigrate: Bool) -> BasemapChoice {
         if shouldPreferBristolBaySatelliteOnline(rawValue: rawValue, didMigrate: didMigrate) {
-            return .bristolBaySatelliteOnline
+            return .districtsOnline
         }
-        return BasemapChoice(rawValue: rawValue) ?? .bristolBaySatelliteOnline
+        return BasemapChoice(rawValue: rawValue) ?? .districtsOnline
     }
 }
 
-enum BasemapLayerPolicy {
+nonisolated enum BasemapLayerPolicy {
+    private static let shorelineOverlaySlugs: Set<String> = [
+        "egegik_to_ugashik_shoreline",
+        "naknek_to_egegik_shoreline",
+        "naknek_to_nushagak_shoreline"
+    ]
+    private static let districtMapBaseSlugs: [String] = [
+        "togiak",
+        "nushagak",
+        "naknek_kvichak",
+        "egegik",
+        "ugashik"
+    ]
+
     static func usesBristolBaySatelliteOnlineBase(_ choice: BasemapChoice) -> Bool {
-        choice == .bristolBaySatelliteOnline || choice == .districtsOffline
+        choice == .districtsOnline
+    }
+
+    nonisolated enum DistrictBristolSource: Equatable {
+        case downloadedOffline
+        case onlineFallback
+    }
+
+    static func districtBristolSource(hasDownloadedOfflinePackage: Bool) -> DistrictBristolSource {
+        hasDownloadedOfflinePackage ? .downloadedOffline : .onlineFallback
+    }
+
+    static func usesAppleSatelliteBase(_ choice: BasemapChoice) -> Bool {
+        choice == .appleSatellite || choice == .districtsOffline
     }
 
     static func isShorelineOverlay(slug: String) -> Bool {
-        OfflinePack.shorelinePacks.contains { $0.slug == slug }
+        shorelineOverlaySlugs.contains(slug)
     }
 
     static func isDistrictOrShorelineOverlay(slug: String) -> Bool {
-        DistrictID.district(forDistrictMapSlug: slug) != nil || isShorelineOverlay(slug: slug)
+        isDistrictMapOverlay(slug: slug) || isShorelineOverlay(slug: slug)
     }
 
     static func tileAlpha(
@@ -87,25 +114,70 @@ enum BasemapLayerPolicy {
             return 1.0
         }
 
-        guard DistrictID.district(forDistrictMapSlug: slug) != nil else {
+        guard isDistrictMapOverlay(slug: slug) else {
             return 1.0
         }
 
         return selectedDistrictMapSlug == slug ? 1.0 : 0.0
     }
+
+    /// Mirrors `DistrictID.mapVersion(forPackSlug:)` without crossing the app's
+    /// default MainActor boundary from this immutable, thread-safe policy.
+    private static func isDistrictMapOverlay(slug: String) -> Bool {
+        for districtSlug in districtMapBaseSlugs {
+            if slug == districtSlug { return true }
+            let versionPrefix = "\(districtSlug)_v"
+            guard slug.hasPrefix(versionPrefix) else { continue }
+            let suffix = slug.dropFirst(versionPrefix.count)
+            if let version = Int(suffix), (1...12).contains(version) {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 final class BristolBaySatelliteTileOverlay: MKTileOverlay {
+    let continuity: RasterMapContinuity
+    static let nativeMaximumZ = 15
+
+    /// Geographic footprint published in the Bristol Bay offline source metadata.
+    /// The online pyramid is the matching source, so advertising this footprint keeps
+    /// MapKit from issuing guaranteed 404 requests elsewhere in the world.
+    static let coverageMapRect = MBTilesGeographicCoverage.mapRect(from: [
+        -158.940_315_428_268_4,
+        57.253_396_320_662_67,
+        -156.727_710_805_028_3,
+        59.283_382_128_638_735
+    ]) ?? .world
+
     private static let baseURL = URL(string: "https://pub-832b588ef9ec4a588045736b6ce409b9.r2.dev")!
     private static let tilesPrefix = "tiles"
     private static let tileStore = BristolBaySatelliteTileStore.shared
 
-    init(replacesMapContent: Bool = false) {
+    override var boundingMapRect: MKMapRect { Self.coverageMapRect }
+    override var coordinate: CLLocationCoordinate2D {
+        MKMapPoint(x: Self.coverageMapRect.midX, y: Self.coverageMapRect.midY).coordinate
+    }
+
+    init(
+        replacesMapContent: Bool = false,
+        displayMaximumZ: Int = BristolBaySatelliteTileOverlay.nativeMaximumZ
+    ) {
+        let baseURL = Self.baseURL.appendingPathComponent(Self.tilesPrefix)
+        let store = Self.tileStore
+        continuity = RasterMapContinuity(bounds: Self.coverageMapRect, minimumZoom: 0,
+                                         maximumZoom: Self.nativeMaximumZ) { tile, completion in
+            store.loadTile(url: baseURL.appendingPathComponent("\(tile.z)/\(tile.x)/\(tile.y).png"),
+                           cacheKey: "z\(tile.z)/x\(tile.x)/y\(tile.y)") { data, error in
+                RasterMapContinuity.decode(data, error: error, completion: completion)
+            }
+        }
         super.init(urlTemplate: nil)
         canReplaceMapContent = replacesMapContent
         tileSize = CGSize(width: 256, height: 256)
         minimumZ = 0
-        maximumZ = 15
+        maximumZ = max(Self.nativeMaximumZ, displayMaximumZ)
     }
 
     override func url(forTilePath path: MKTileOverlayPath) -> URL {
@@ -117,30 +189,193 @@ final class BristolBaySatelliteTileOverlay: MKTileOverlay {
     }
 
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
+        guard path.z > Self.nativeMaximumZ else {
+            loadSourceTile(at: path, result: result)
+            return
+        }
+
+        let delta = path.z - Self.nativeMaximumZ
+        guard delta > 0, delta <= 8, path.x >= 0, path.y >= 0 else {
+            result(nil, nil)
+            return
+        }
+
+        let childScale = 1 << delta
+        let sourcePath = MKTileOverlayPath(
+            x: path.x >> delta,
+            y: path.y >> delta,
+            z: Self.nativeMaximumZ,
+            contentScaleFactor: path.contentScaleFactor
+        )
+        let childX = path.x & (childScale - 1)
+        let childY = path.y & (childScale - 1)
+        let sourceURL = url(forTilePath: sourcePath)
+        let sourceCacheKey = "z\(sourcePath.z)/x\(sourcePath.x)/y\(sourcePath.y)"
+        let outputCacheKey = "overzoom/z\(path.z)/x\(path.x)/y\(path.y)"
+        Self.tileStore.loadOverzoomedTile(
+            sourceURL: sourceURL,
+            sourceCacheKey: sourceCacheKey,
+            outputCacheKey: outputCacheKey,
+            childX: childX,
+            childY: childY,
+            childScale: childScale,
+            result: result
+        )
+    }
+
+    private func loadSourceTile(
+        at path: MKTileOverlayPath,
+        result: @escaping (Data?, Error?) -> Void
+    ) {
         let url = url(forTilePath: path)
         let cacheKey = "z\(path.z)/x\(path.x)/y\(path.y)"
         Self.tileStore.loadTile(url: url, cacheKey: cacheKey, result: result)
     }
+
+    /// Performs the smallest reusable validation needed by both cold disk reads and
+    /// URLSession responses. `kCGImageSourceShouldCacheImmediately` forces ImageIO to
+    /// decode the complete payload here, on the store's read/network worker, before
+    /// bytes can enter either cache or reach MapKit.
+    nonisolated static func isValidNativeTilePayload(
+        _ data: Data,
+        expectedPixelSize: Int = 256
+    ) -> Bool {
+        guard expectedPixelSize > 0,
+              data.count >= 8,
+              data.starts(with: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+                || (data.count >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) else {
+            return false
+        }
+
+        let metadataOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, metadataOptions),
+              CGImageSourceGetCount(source) == 1,
+              CGImageSourceGetStatus(source) == .statusComplete,
+              CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+              let properties = CGImageSourceCopyPropertiesAtIndex(
+                source,
+                0,
+                metadataOptions
+              ) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width == expectedPixelSize,
+              height == expectedPixelSize else {
+            return false
+        }
+
+        let decodeOptions = [
+            kCGImageSourceShouldCache: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary
+        guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, decodeOptions) else {
+            return false
+        }
+        return decoded.width == expectedPixelSize && decoded.height == expectedPixelSize
+    }
 }
 
-private final class BristolBaySatelliteTileStore {
+nonisolated enum BristolBaySatelliteTileStoreError: LocalizedError {
+    case notFound
+    case saturated
+    case invalidImageResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .notFound:
+            return "No tile is published at this coordinate."
+        case .saturated:
+            return "The Bristol Bay satellite tile queue is temporarily full."
+        case .invalidImageResponse:
+            return "The Bristol Bay satellite server did not return a valid raster tile."
+        }
+    }
+}
+
+/// A deliberately bounded pipeline for the online Bristol Bay pyramid. Source
+/// bytes and derived overzoom children have independent coalescing tables so a
+/// burst of repeated MapKit requests performs one disk/network read and one crop.
+nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
+    typealias Completion = (Data?, Error?) -> Void
+    private static let maximumTilePayloadBytes = 4 * 1_024 * 1_024
+
+    private struct NetworkRequest {
+        let url: URL
+        let cacheKey: String
+    }
+
+    private struct DiskEntry {
+        let url: URL
+        let byteCount: Int
+        var lastAccess: Date
+    }
+
     static let shared = BristolBaySatelliteTileStore()
 
-    private let memoryCache = NSCache<NSString, NSData>()
+    // All cache access is serialized by stateQueue, so the engine's strict-cost
+    // LRU gives this path a real ceiling instead of NSCache's advisory limit.
+    private let sourceMemoryCache = CostedLRU<String, Data>(
+        costLimit: 4 * 1_024 * 1_024,
+        countLimit: 64
+    )
+    private let derivedMemoryCache = CostedLRU<String, Data>(
+        costLimit: 2 * 1_024 * 1_024,
+        countLimit: 32
+    )
     private let session: URLSession
     private let rootDirectory: URL
-    private let lock = NSLock()
-    private var inFlight: [String: [(Data?, Error?) -> Void]] = [:]
+    private let stateQueue = DispatchQueue(
+        label: "com.satchart.bristol-bay-satellite.state",
+        qos: .userInitiated
+    )
+    private let completionQueue = DispatchQueue(
+        label: "com.satchart.bristol-bay-satellite.completions",
+        qos: .userInitiated
+    )
+    private let readOperations: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.satchart.bristol-bay-satellite.read"
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+    private let cropOperations: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.satchart.bristol-bay-satellite.crop"
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+    private let writeQueue = DispatchQueue(
+        label: "com.satchart.bristol-bay-satellite.write",
+        qos: .utility
+    )
+
+    // Accessed only on stateQueue after initialization.
+    private var sourceInFlight: [String: [Completion]] = [:]
+    private var derivedInFlight: [String: [Completion]] = [:]
+    private var pendingNetworkRequests: [NetworkRequest] = []
+    private var activeNetworkRequests = 0
+    private var maximumNetworkRequests = 2
+    private var maximumSourceKeys = 96
+    private var maximumDerivedKeys = 96
+    private var maximumCallbacksPerKey = 32
+    private var observers: [NSObjectProtocol] = []
+
+    // Accessed only on writeQueue after initialization.
+    private var diskEntries: [String: DiskEntry] = [:]
+    private var diskByteCount = 0
+    private var diskByteLimit = 96 * 1_024 * 1_024
+    private var diskCountLimit = 2_048
 
     private init() {
-        memoryCache.totalCostLimit = 128 * 1024 * 1024
-        memoryCache.countLimit = 1600
-
+        let profile = MBTilesResourceProfile.current()
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpMaximumConnectionsPerHost = 8
+        // URLSession provides a second ceiling; the state-queue pump below can
+        // lower concurrency dynamically for power and thermal pressure.
+        configuration.httpMaximumConnectionsPerHost = profile.onlineSatelliteConnections
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 40
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
         configuration.waitsForConnectivity = false
         session = URLSession(configuration: configuration)
 
@@ -148,115 +383,428 @@ private final class BristolBaySatelliteTileStore {
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         rootDirectory = cachesRoot.appendingPathComponent("BristolBaySatelliteTiles/v1", isDirectory: true)
 
-        try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true, attributes: nil)
+        applyResourceProfileLocked(profile)
+        installObservers()
+        let initialDiskLimits = Self.diskLimits(for: profile)
+        writeQueue.async { [self] in
+            diskByteLimit = initialDiskLimits.bytes
+            diskCountLimit = initialDiskLimits.count
+            rebuildDiskIndexAndTrim()
+        }
     }
 
-    func loadTile(url: URL, cacheKey: String, result: @escaping (Data?, Error?) -> Void) {
-        if let cached = loadFromCache(cacheKey: cacheKey) {
-            result(cached, nil)
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        session.invalidateAndCancel()
+    }
+
+    func loadTile(url: URL, cacheKey: String, result: @escaping Completion) {
+        // Register before any file I/O. This coalesces both a cold disk lookup and
+        // the subsequent URL request, rather than only merging requests at the
+        // network stage.
+        stateQueue.async { [self] in
+            beginSourceLoadLocked(url: url, cacheKey: cacheKey, result: result)
+        }
+    }
+
+    func loadOverzoomedTile(
+        sourceURL: URL,
+        sourceCacheKey: String,
+        outputCacheKey: String,
+        childX: Int,
+        childY: Int,
+        childScale: Int,
+        result: @escaping Completion
+    ) {
+        stateQueue.async { [self] in
+            if let cached = derivedMemoryCache.value(for: outputCacheKey) {
+                deliver([result], data: cached, error: nil)
+                return
+            }
+
+            if var callbacks = derivedInFlight[outputCacheKey] {
+                guard callbacks.count < maximumCallbacksPerKey else {
+                    deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
+                    return
+                }
+                callbacks.append(result)
+                derivedInFlight[outputCacheKey] = callbacks
+                return
+            }
+
+            guard derivedInFlight.count < maximumDerivedKeys else {
+                deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
+                return
+            }
+            derivedInFlight[outputCacheKey] = [result]
+
+            loadTile(url: sourceURL, cacheKey: sourceCacheKey) { [self] sourceData, sourceError in
+                guard let sourceData else {
+                    stateQueue.async { [self] in
+                        finishDerivedLocked(
+                            cacheKey: outputCacheKey,
+                            data: nil,
+                            error: sourceError ?? BristolBaySatelliteTileStoreError.invalidImageResponse
+                        )
+                    }
+                    return
+                }
+
+                cropOperations.addOperation { [self] in
+                    let output = autoreleasepool { () -> Data? in
+                        guard let format = MBTilesOverlay.rasterTileFormat(for: sourceData) else { return nil }
+                        return MBTilesOverlay.overzoomedTileData(
+                            from: sourceData,
+                            childX: childX,
+                            childY: childY,
+                            childScale: childScale,
+                            format: format
+                        )
+                    }
+                    stateQueue.async { [self] in
+                        if let output {
+                            derivedMemoryCache.insert(output, for: outputCacheKey, cost: output.count)
+                        }
+                        finishDerivedLocked(
+                            cacheKey: outputCacheKey,
+                            data: output,
+                            error: output == nil
+                                ? BristolBaySatelliteTileStoreError.invalidImageResponse
+                                : nil
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func beginSourceLoadLocked(
+        url: URL,
+        cacheKey: String,
+        result: @escaping Completion
+    ) {
+        if let cached = sourceMemoryCache.value(for: cacheKey) {
+            deliver([result], data: cached, error: nil)
             return
         }
 
-        lock.lock()
-        if var callbacks = inFlight[cacheKey] {
+        if var callbacks = sourceInFlight[cacheKey] {
+            guard callbacks.count < maximumCallbacksPerKey else {
+                deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
+                return
+            }
             callbacks.append(result)
-            inFlight[cacheKey] = callbacks
-            lock.unlock()
+            sourceInFlight[cacheKey] = callbacks
             return
-        } else {
-            inFlight[cacheKey] = [result]
-            lock.unlock()
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("image/png,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.setValue("SatChart-BristolBaySatellite/1.0", forHTTPHeaderField: "User-Agent")
+        guard sourceInFlight.count < maximumSourceKeys else {
+            deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
+            return
+        }
+        sourceInFlight[cacheKey] = [result]
 
-        session.dataTask(with: request) { [weak self] data, response, error in
-            guard let self else {
-                result(nil, error)
-                return
+        readOperations.addOperation { [self] in
+            let diskData = loadFromDisk(cacheKey: cacheKey)
+            stateQueue.async { [self] in
+                guard sourceInFlight[cacheKey] != nil else { return }
+                if let diskData {
+                    sourceMemoryCache.insert(diskData, for: cacheKey, cost: diskData.count)
+                    finishSourceLocked(cacheKey: cacheKey, data: diskData, error: nil)
+                } else {
+                    pendingNetworkRequests.append(NetworkRequest(url: url, cacheKey: cacheKey))
+                    pumpNetworkLocked()
+                }
             }
-
-            if let validated = self.validatedImageData(data, response: response) {
-                self.storeInCache(validated, cacheKey: cacheKey)
-                self.finish(cacheKey: cacheKey, data: validated, error: nil)
-                return
-            }
-
-            self.finish(cacheKey: cacheKey, data: nil, error: error)
-        }.resume()
+        }
     }
 
-    private func loadFromCache(cacheKey: String) -> Data? {
-        let nsKey = cacheKey as NSString
-        if let cached = memoryCache.object(forKey: nsKey) {
-            return cached as Data
-        }
+    private func pumpNetworkLocked() {
+        while activeNetworkRequests < maximumNetworkRequests,
+              !pendingNetworkRequests.isEmpty {
+            // Prefer the newest viewport demand when an earlier pan left a queue
+            // behind. The queue remains bounded, and every older request still
+            // retains its exactly-once completion while it waits.
+            let pending = pendingNetworkRequests.removeLast()
+            activeNetworkRequests += 1
 
-        let url = cacheFileURL(for: cacheKey)
-        if let diskData = try? Data(contentsOf: url) {
-            memoryCache.setObject(diskData as NSData, forKey: nsKey, cost: diskData.count)
-            return diskData
-        }
+            var request = URLRequest(url: pending.url)
+            request.timeoutInterval = 20
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.setValue("image/png,*/*;q=0.8", forHTTPHeaderField: "Accept")
+            request.setValue("SatChart-BristolBaySatellite/1.0", forHTTPHeaderField: "User-Agent")
 
-        return nil
+            session.dataTask(with: request) { [self] data, response, error in
+                let validated = validatedImageData(data, response: response)
+                stateQueue.async { [self] in
+                    activeNetworkRequests = max(0, activeNetworkRequests - 1)
+                    if let validated {
+                        sourceMemoryCache.insert(validated, for: pending.cacheKey, cost: validated.count)
+                        storeOnDisk(validated, cacheKey: pending.cacheKey)
+                        finishSourceLocked(cacheKey: pending.cacheKey, data: validated, error: nil)
+                    } else {
+                        finishSourceLocked(
+                            cacheKey: pending.cacheKey,
+                            data: nil,
+                            error: error ?? ((response as? HTTPURLResponse).map { [404, 410].contains($0.statusCode) } == true
+                                ? BristolBaySatelliteTileStoreError.notFound
+                                : BristolBaySatelliteTileStoreError.invalidImageResponse)
+                        )
+                    }
+                    pumpNetworkLocked()
+                }
+            }.resume()
+        }
     }
 
-    private func storeInCache(_ data: Data, cacheKey: String) {
-        memoryCache.setObject(data as NSData, forKey: cacheKey as NSString, cost: data.count)
+    private func finishSourceLocked(cacheKey: String, data: Data?, error: Error?) {
+        let callbacks = sourceInFlight.removeValue(forKey: cacheKey) ?? []
+        deliver(callbacks, data: data, error: error)
+    }
 
+    private func finishDerivedLocked(cacheKey: String, data: Data?, error: Error?) {
+        let callbacks = derivedInFlight.removeValue(forKey: cacheKey) ?? []
+        deliver(callbacks, data: data, error: error)
+    }
+
+    private func deliver(_ callbacks: [Completion], data: Data?, error: Error?) {
+        guard !callbacks.isEmpty else { return }
+        completionQueue.async {
+            for callback in callbacks {
+                callback(data, error)
+            }
+        }
+    }
+
+    private func loadFromDisk(cacheKey: String) -> Data? {
+        assert(!Thread.isMainThread, "Bristol Bay satellite file I/O must remain off-main")
         let url = cacheFileURL(for: cacheKey)
-        DispatchQueue.global(qos: .utility).async {
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true,
-                attributes: nil
+        guard let diskData = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+            return nil
+        }
+        guard validatedImageData(diskData, response: nil) != nil else {
+            removeDiskEntry(at: url)
+            return nil
+        }
+        recordDiskAccess(at: url, byteCount: diskData.count)
+        return diskData
+    }
+
+    private func storeOnDisk(_ data: Data, cacheKey: String) {
+        let url = cacheFileURL(for: cacheKey)
+        writeQueue.async { [self] in
+            do {
+                try FileManager.default.createDirectory(
+                    at: rootDirectory,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                try data.write(to: url, options: .atomic)
+                let key = url.path
+                if let previous = diskEntries[key] {
+                    diskByteCount -= previous.byteCount
+                }
+                diskEntries[key] = DiskEntry(url: url, byteCount: data.count, lastAccess: Date())
+                diskByteCount += data.count
+                trimDiskCacheIfNeeded()
+            } catch {
+                // A cache write failure must never fail an already-loaded map tile.
+            }
+        }
+    }
+
+    private func recordDiskAccess(at url: URL, byteCount: Int) {
+        writeQueue.async { [self] in
+            let key = url.path
+            if var entry = diskEntries[key] {
+                entry.lastAccess = Date()
+                diskEntries[key] = entry
+            } else if FileManager.default.fileExists(atPath: key) {
+                diskEntries[key] = DiskEntry(url: url, byteCount: byteCount, lastAccess: Date())
+                diskByteCount += byteCount
+                trimDiskCacheIfNeeded()
+            }
+        }
+    }
+
+    private func removeDiskEntry(at url: URL) {
+        writeQueue.async { [self] in
+            let key = url.path
+            if let entry = diskEntries.removeValue(forKey: key) {
+                diskByteCount = max(0, diskByteCount - entry.byteCount)
+            }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func rebuildDiskIndexAndTrim() {
+        try? FileManager.default.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        diskEntries.removeAll(keepingCapacity: true)
+        diskByteCount = 0
+        for url in urls where url.pathExtension == "tile" {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  let byteCount = values.fileSize,
+                  byteCount > 0 else {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            let entry = DiskEntry(
+                url: url,
+                byteCount: byteCount,
+                lastAccess: values.contentModificationDate ?? .distantPast
             )
-            try? data.write(to: url, options: .atomic)
+            diskEntries[url.path] = entry
+            diskByteCount += byteCount
         }
+        trimDiskCacheIfNeeded()
+    }
+
+    private func trimDiskCacheIfNeeded() {
+        guard diskByteCount > diskByteLimit || diskEntries.count > diskCountLimit else { return }
+        let oldestFirst = diskEntries.values.sorted { lhs, rhs in
+            if lhs.lastAccess != rhs.lastAccess { return lhs.lastAccess < rhs.lastAccess }
+            return lhs.url.path < rhs.url.path
+        }
+        for entry in oldestFirst {
+            guard diskByteCount > diskByteLimit || diskEntries.count > diskCountLimit else { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            diskEntries.removeValue(forKey: entry.url.path)
+            diskByteCount = max(0, diskByteCount - entry.byteCount)
+        }
+    }
+
+    private func installObservers() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.handleMemoryWarning()
+        })
+        observers.append(center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.handleBackgrounding()
+        })
+        observers.append(center.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.refreshResourceProfile()
+        })
+        observers.append(center.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.refreshResourceProfile()
+        })
+    }
+
+    private func handleMemoryWarning() {
+        stateQueue.async { [self] in
+            sourceMemoryCache.removeAll()
+            derivedMemoryCache.removeAll()
+            applyResourceProfileLocked(MBTilesResourceProfile.current())
+            pumpNetworkLocked()
+        }
+    }
+
+    private func handleBackgrounding() {
+        stateQueue.async { [self] in
+            derivedMemoryCache.removeAll()
+            sourceMemoryCache.removeAll()
+        }
+        writeQueue.async { [self] in trimDiskCacheIfNeeded() }
+    }
+
+    private func refreshResourceProfile() {
+        let profile = MBTilesResourceProfile.current()
+        stateQueue.async { [self] in
+            applyResourceProfileLocked(profile)
+            pumpNetworkLocked()
+        }
+        let limits = Self.diskLimits(for: profile)
+        writeQueue.async { [self] in
+            diskByteLimit = limits.bytes
+            diskCountLimit = limits.count
+            trimDiskCacheIfNeeded()
+        }
+    }
+
+    private func applyResourceProfileLocked(_ profile: MBTilesResourceProfile) {
+        let totalMemory = profile.onlineSatelliteCacheBytes
+        let sourceMemory = max(4 * 1_024 * 1_024, (totalMemory * 3) / 4)
+        let derivedMemory = max(2 * 1_024 * 1_024, totalMemory - sourceMemory)
+        sourceMemoryCache.updateLimits(
+            costLimit: sourceMemory,
+            countLimit: max(64, sourceMemory / (64 * 1_024))
+        )
+        derivedMemoryCache.updateLimits(
+            costLimit: derivedMemory,
+            countLimit: max(32, derivedMemory / (64 * 1_024))
+        )
+
+        maximumSourceKeys = max(32, profile.maximumQueuedWork)
+        maximumDerivedKeys = max(32, profile.maximumQueuedWork)
+        maximumCallbacksPerKey = max(16, min(64, profile.maximumQueuedWork / 2))
+        readOperations.maxConcurrentOperationCount = max(
+            1,
+            min(profile.onlineSatelliteConnections, profile.maximumActiveWork)
+        )
+        cropOperations.maxConcurrentOperationCount = max(
+            1,
+            min(profile.onlineSatelliteConnections, profile.maximumActiveWork)
+        )
+        maximumNetworkRequests = profile.maximumSpeculativeWork == 0
+            ? max(1, min(profile.onlineSatelliteConnections, profile.maximumActiveWork))
+            : max(1, profile.onlineSatelliteConnections)
+    }
+
+    private static func diskLimits(for profile: MBTilesResourceProfile) -> (bytes: Int, count: Int) {
+        let bytes = max(
+            32 * 1_024 * 1_024,
+            min(192 * 1_024 * 1_024, profile.onlineSatelliteCacheBytes * 4)
+        )
+        let count = max(512, min(4_096, bytes / (48 * 1_024)))
+        return (bytes, count)
     }
 
     private func validatedImageData(_ data: Data?, response: URLResponse?) -> Data? {
-        guard let data, !data.isEmpty else { return nil }
+        guard let data,
+              !data.isEmpty,
+              data.count <= Self.maximumTilePayloadBytes else { return nil }
 
         if let http = response as? HTTPURLResponse {
             guard (200...299).contains(http.statusCode) else { return nil }
 
             let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
-            if contentType.contains("image/png") || contentType.contains("image/jpeg") {
-                return data
-            }
-            if contentType.contains("xml") || contentType.contains("html") || contentType.contains("text") || contentType.contains("json") {
+            if contentType.contains("xml") || contentType.contains("html")
+                || contentType.contains("text") || contentType.contains("json") {
                 return nil
             }
         }
 
-        return Self.looksLikePNG(data) || Self.looksLikeJPEG(data) ? data : nil
-    }
-
-    private static func looksLikePNG(_ data: Data) -> Bool {
-        guard data.count >= 8 else { return false }
-        let signature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
-        return Array(data.prefix(8)) == signature
-    }
-
-    private static func looksLikeJPEG(_ data: Data) -> Bool {
-        guard data.count >= 3 else { return false }
-        return data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
-    }
-
-    private func finish(cacheKey: String, data: Data?, error: Error?) {
-        let callbacks: [(Data?, Error?) -> Void]
-        lock.lock()
-        callbacks = inFlight.removeValue(forKey: cacheKey) ?? []
-        lock.unlock()
-
-        for callback in callbacks {
-            callback(data, error)
-        }
+        return BristolBaySatelliteTileOverlay.isValidNativeTilePayload(
+            data,
+            expectedPixelSize: 256
+        ) ? data : nil
     }
 
     private func cacheFileURL(for cacheKey: String) -> URL {
@@ -371,7 +919,8 @@ final class USGSTopoOnlineTileOverlay: MKTileOverlay {
     }
 }
 
-/// One locally-downloaded offline basemap package discovered in Documents/MBTiles.
+/// One validated locally-downloaded offline basemap package from the manager's
+/// active Application Support inventory (or its controlled legacy fallback).
 ///
 /// Naming conventions supported by the discovery code:
 /// - noaa.mbtiles / ncds.mbtiles
@@ -384,13 +933,16 @@ struct LocalNOAAChartPackage: Identifiable {
     let coverageMapRect: MKMapRect?
     let minZoom: Int?
     let maxZoom: Int?
+    let storageScheme: MBTilesStorageScheme
+    let tileWidth: Int
+    let tileHeight: Int
 
     var id: String { slug }
 }
 
 extension OfflineMapsManager {
 
-    /// Returns all locally-downloaded NOAA/NCDS offline chart packages currently stored in Documents/MBTiles.
+    /// Returns all active, validated NOAA/NCDS offline chart packages.
     ///
     /// This intentionally excludes the offline Bristol Bay satellite basemap so the
     /// two offline basemap choices do not alias each other.
@@ -439,38 +991,26 @@ extension OfflineMapsManager {
         matching matchesSlug: @escaping (String) -> Bool,
         priority: @escaping (String) -> Int
     ) -> [LocalNOAAChartPackage] {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("MBTiles", isDirectory: true)
-
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return urls
-            .filter { $0.pathExtension.lowercased() == "mbtiles" }
-            .filter { matchesSlug($0.deletingPathExtension().lastPathComponent) }
+        return installedRecordsSnapshot()
+            .filter { matchesSlug($0.slug) }
             .sorted {
-                let lhsSlug = $0.deletingPathExtension().lastPathComponent
-                let rhsSlug = $1.deletingPathExtension().lastPathComponent
-                let lhsPriority = priority(lhsSlug)
-                let rhsPriority = priority(rhsSlug)
+                let lhsPriority = priority($0.slug)
+                let rhsPriority = priority($1.slug)
                 if lhsPriority != rhsPriority {
                     return lhsPriority < rhsPriority
                 }
-                return $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
+                return $0.slug.localizedCaseInsensitiveCompare($1.slug) == .orderedAscending
             }
-            .map { url in
-                NOAAMBTilesMetadataReader.readPackage(at: url)
-                ?? LocalNOAAChartPackage(
-                    url: url,
-                    slug: url.deletingPathExtension().lastPathComponent,
-                    coverageMapRect: nil,
-                    minZoom: nil,
-                    maxZoom: nil
+            .map { record in
+                LocalNOAAChartPackage(
+                    url: record.url,
+                    slug: record.slug,
+                    coverageMapRect: record.bounds.flatMap(Self.coverageRect(from:)),
+                    minZoom: record.minimumZoom,
+                    maxZoom: record.maximumZoom,
+                    storageScheme: record.storageScheme,
+                    tileWidth: record.tileWidth,
+                    tileHeight: record.tileHeight
                 )
             }
     }
@@ -538,6 +1078,7 @@ extension OfflineMapsManager {
     private static func looksLikeBristolBaySatelliteSlug(_ slug: String) -> Bool {
         let s = slug.lowercased()
         return s == "bristol_bay" || s == "bristol-bay"
+            || s.hasPrefix("bristol_bay_v") || s.hasPrefix("bristol-bay-v")
     }
 
     private static func noaaSlugPriority(_ slug: String) -> Int {
@@ -558,6 +1099,12 @@ extension OfflineMapsManager {
         }
         if s == "bristol-bay" {
             return 1
+        }
+        if s.hasPrefix("bristol_bay_v") {
+            return 2
+        }
+        if s.hasPrefix("bristol-bay-v") {
+            return 3
         }
         return 2
     }
@@ -595,97 +1142,8 @@ extension OfflineMapsManager {
         return width * height
     }
 
-}
-
-private enum NOAAMBTilesMetadataReader {
-
-    nonisolated static func readPackage(at url: URL) -> LocalNOAAChartPackage? {
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
-
-        let rc = sqlite3_open_v2(url.path, &db, flags, nil)
-        guard rc == SQLITE_OK, let db else {
-            if let db {
-                sqlite3_close(db)
-            }
-            return nil
-        }
-        defer { sqlite3_close(db) }
-
-        let slug = url.deletingPathExtension().lastPathComponent
-        let boundsRect = metadataString(db: db, name: "bounds").flatMap(coverageRect(from:))
-        let minZoom = metadataString(db: db, name: "minzoom").flatMap(parseZoom(from:))
-        let maxZoom = metadataString(db: db, name: "maxzoom").flatMap(parseZoom(from:))
-
-        return LocalNOAAChartPackage(
-            url: url,
-            slug: slug,
-            coverageMapRect: boundsRect,
-            minZoom: minZoom,
-            maxZoom: maxZoom
-        )
+    private static func coverageRect(from bounds: [Double]) -> MKMapRect? {
+        MBTilesGeographicCoverage.mapRect(from: bounds)
     }
 
-    nonisolated private static func metadataString(db: OpaquePointer, name: String) -> String? {
-        let sql = "SELECT value FROM metadata WHERE name=? LIMIT 1;"
-        var stmt: OpaquePointer?
-
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return nil
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        sqlite3_bind_text(stmt, 1, name, -1, sqliteTransient)
-
-        guard sqlite3_step(stmt) == SQLITE_ROW,
-              let cstr = sqlite3_column_text(stmt, 0) else {
-            return nil
-        }
-
-        return String(cString: cstr)
-    }
-
-    nonisolated private static func parseZoom(from string: String) -> Int? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let intValue = Int(trimmed) {
-            return intValue
-        }
-        if let doubleValue = Double(trimmed) {
-            return Int(doubleValue.rounded(.towardZero))
-        }
-        return nil
-    }
-
-    /// MBTiles bounds metadata is: minLon,minLat,maxLon,maxLat
-    nonisolated private static func coverageRect(from boundsString: String) -> MKMapRect? {
-        let parts = boundsString
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-
-        guard parts.count == 4,
-              let minLon = Double(parts[0]),
-              let minLat = Double(parts[1]),
-              let maxLon = Double(parts[2]),
-              let maxLat = Double(parts[3]),
-              minLon < maxLon,
-              minLat < maxLat else {
-            return nil
-        }
-
-        let southWest = CLLocationCoordinate2D(latitude: minLat, longitude: minLon)
-        let northEast = CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
-
-        guard CLLocationCoordinate2DIsValid(southWest), CLLocationCoordinate2DIsValid(northEast) else {
-            return nil
-        }
-
-        let a = MKMapPoint(southWest)
-        let b = MKMapPoint(northEast)
-        let origin = MKMapPoint(x: min(a.x, b.x), y: min(a.y, b.y))
-        let size = MKMapSize(width: abs(a.x - b.x), height: abs(a.y - b.y))
-
-        guard size.width > 0, size.height > 0 else { return nil }
-        return MKMapRect(origin: origin, size: size)
-    }
 }

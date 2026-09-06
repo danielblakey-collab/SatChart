@@ -1,0 +1,120 @@
+{
+  "source": "Egegik v4 published MBTiles and XYZ, unmodified tile bytes at zooms 11 and 12",
+  "tiles": [
+    {
+      "file": "egegik-v4-xyz-11-127-615.png",
+      "sha256": "721d75049bc8271d86ef85b85d053ca0f0ba6163f4c9b8ccdf899364b7befeff",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-11-127-614.png",
+      "sha256": "612c02d7b9927e1b0cfb2f943ac885e1bc34ca431af5463139c500a73291eb47",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-11-127-613.png",
+      "sha256": "6a4e0538a2d0deee6d07aed723812ed222f0e21bf12039d78e3a37163efc23cb",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-11-128-615.png",
+      "sha256": "d3edf8d6bcecbdcd40bffe7e90eb819917196868b5d41fa400dac869a585c8c7",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-11-128-614.png",
+      "sha256": "fbb425396d80dbe5293156140bc5f7f069539578647c0b14af5214588845e760",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-11-129-614.png",
+      "sha256": "0d99e0e7f62e3cc113ae441814be917d8acdc702de7ee7da4d4e427ec4a93e53",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-254-1230.png",
+      "sha256": "a57e1d6a3f635340ec681cef3ab7c4904ef86d5756b1453befcd4702bd7b53e7",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-254-1229.png",
+      "sha256": "b9ec709d0362496ec2901421314d7e541b4f942d429ec526dfc7bae074b6c110",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-254-1228.png",
+      "sha256": "c76e42d4ae17dd1534b84cf4663ce08f6d8b01e324c9655497c8457e6ed2e9a0",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-254-1227.png",
+      "sha256": "9ba39fd40f0fec68a42e2dd1731b607e595556ead9faa0704ab1ff02f32b1c2d",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-254-1226.png",
+      "sha256": "5c2f4ec98bcf523fb1173df74d8daa22f783315aea28f868ca95b6327dccfe31",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-255-1230.png",
+      "sha256": "5f06bbb50f4bd5482c5106bdcad5035589305ffba77e68734008625b5893542b",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-255-1229.png",
+      "sha256": "1f65820bf9775acd01ff24a65f76119b7333ad61260881896e7e4e0f9c892395",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-255-1228.png",
+      "sha256": "f11aa94a0888e4e3c14dcf3244b219bcdb7d7ebd386803aa4b3326b6ccfc6e0f",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-255-1227.png",
+      "sha256": "2f4fc7472d53d0f2c88b856b260e6e059eb885ea1a8f4c3c7d38d76290326791",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-255-1226.png",
+      "sha256": "fcff54cb0269d9aa1b5c1154715a2848ee813a4cccb7eef8af4d81e473435ca2",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-256-1230.png",
+      "sha256": "c897edb52fdd867a8852b5247a74f27e436924d215df487306a04ecc7adfcd47",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-256-1229.png",
+      "sha256": "dbb542e34b480e51102ca10ff2cd1d7ce9c814f296eb159604af797d979dafbf",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-256-1228.png",
+      "sha256": "2351e93370303d523ed42f3929ae0ef5eadfe379d3f481cdbe9ec67494f13990",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-257-1229.png",
+      "sha256": "cdea8607a1b682d5aa418777aaaef3d3b86d4b249c82ef3519348db86b62dede",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-257-1228.png",
+      "sha256": "743a65472b31423b0745fa3fd494d4ae333dfc235243764ac41ad6e89297c143",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-258-1229.png",
+      "sha256": "44bdce598d3c20c032815b4247f5b52de07b66218e691526beaa41f8823a8d24",
+      "matchesMBTiles": false
+    },
+    {
+      "file": "egegik-v4-xyz-12-258-1228.png",
+      "sha256": "2fbf23901cb78b4222d30f1f11de7f814ec9391e985d3d2a81c9da05007fecf4",
+      "matchesMBTiles": false
+    }
+  ]
+}

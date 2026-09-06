@@ -2,8 +2,23 @@ import SwiftUI
 import FirebaseCore
 import UIKit
 
+final class SatChartAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard identifier == "com.curraghfisheries.SatChart.offline-mbtiles" else {
+            completionHandler()
+            return
+        }
+        OfflineMapsManager.shared.handleBackgroundURLSessionEvents(completionHandler: completionHandler)
+    }
+}
+
 @main
 struct SatChartApp: App {
+    @UIApplicationDelegateAdaptor(SatChartAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("keepDisplayOnWhileAppInUse") private var keepDisplayOnWhileAppInUse: Bool = false
 
