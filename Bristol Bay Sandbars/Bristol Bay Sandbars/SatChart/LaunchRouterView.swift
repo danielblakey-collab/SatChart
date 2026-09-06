@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LaunchRouterView: View {
     @StateObject private var authStore = AuthStateStore()
@@ -73,7 +74,9 @@ private struct LaunchLoadingView: View {
     var body: some View {
         SatChartAuthShell(
             title: "SatChart",
-            subtitle: "Preparing your account."
+            subtitle: "Preparing your account.",
+            brandSubtitle: SatChartBrandAssets.tagline,
+            usesAppIcon: true
         ) {
             HStack(spacing: 12) {
                 ProgressView()
@@ -130,11 +133,21 @@ enum SatChartLegalLinks {
 struct SatChartAuthShell<Content: View>: View {
     let title: String
     let subtitle: String
+    let brandSubtitle: String
+    let usesAppIcon: Bool
     let content: Content
 
-    init(title: String, subtitle: String, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        subtitle: String,
+        brandSubtitle: String = "Bristol Bay fisheries analytics",
+        usesAppIcon: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.brandSubtitle = brandSubtitle
+        self.usesAppIcon = usesAppIcon
         self.content = content()
     }
 
@@ -150,7 +163,10 @@ struct SatChartAuthShell<Content: View>: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        SatChartBrandHeader()
+                        SatChartBrandHeader(
+                            subtitle: brandSubtitle,
+                            usesAppIcon: usesAppIcon
+                        )
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text(title)
@@ -181,27 +197,69 @@ struct SatChartAuthShell<Content: View>: View {
 }
 
 private struct SatChartBrandHeader: View {
+    let subtitle: String
+    let usesAppIcon: Bool
+
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(menuBlue)
-
-                Image(systemName: "wave.3.right")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
+            Group {
+                if usesAppIcon {
+                    if let appIcon = SatChartBrandAssets.appIcon {
+                        Image(uiImage: appIcon)
+                            .renderingMode(.original)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        SatChartFallbackBrandIcon()
+                    }
+                } else {
+                    SatChartFallbackBrandIcon()
+                }
             }
             .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("SatChart")
                     .font(.headline)
                     .foregroundStyle(scTextPrimary)
 
-                Text("Bristol Bay fisheries analytics")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(scTextSecondary)
             }
+        }
+    }
+}
+
+enum SatChartBrandAssets {
+    static let tagline = "Know more.  Fish Smarter"
+
+    static var appIcon: UIImage? {
+        // App-icon sets are compiled differently from ordinary image sets.
+        // Load the concrete primary-icon rendition that actool writes into the
+        // application bundle instead of asking SwiftUI to resolve "AppIcon".
+        for dictionaryKey in ["CFBundleIcons", "CFBundleIcons~ipad"] {
+            guard let icons = Bundle.main.object(forInfoDictionaryKey: dictionaryKey) as? [String: Any],
+                  let primaryIcon = icons["CFBundlePrimaryIcon"] as? [String: Any],
+                  let filenames = primaryIcon["CFBundleIconFiles"] as? [String] else { continue }
+            for filename in filenames.reversed() {
+                if let image = UIImage(named: filename) { return image }
+            }
+        }
+        return UIImage(named: "AppIcon")
+    }
+}
+
+private struct SatChartFallbackBrandIcon: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(menuBlue)
+
+            Image(systemName: "wave.3.right")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 }

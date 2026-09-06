@@ -8,7 +8,9 @@ struct SignInView: View {
     var body: some View {
         SatChartAuthShell(
             title: "Sign in",
-            subtitle: "Use the email and password for your SatChart account."
+            subtitle: "Use the email and password for your SatChart account.",
+            brandSubtitle: SatChartBrandAssets.tagline,
+            usesAppIcon: true
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 if let errorMessage = authStore.errorMessage {

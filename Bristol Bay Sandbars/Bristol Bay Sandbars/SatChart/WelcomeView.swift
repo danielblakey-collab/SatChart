@@ -6,7 +6,9 @@ struct WelcomeView: View {
     var body: some View {
         SatChartAuthShell(
             title: "Welcome to SatChart",
-            subtitle: "Sign in with email to use the Bristol Bay analytics and map tools."
+            subtitle: "Sign in with email to use the Bristol Bay analytics and map tools.",
+            brandSubtitle: SatChartBrandAssets.tagline,
+            usesAppIcon: true
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 if let errorMessage = authStore.errorMessage {

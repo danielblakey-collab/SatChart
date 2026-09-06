@@ -18,6 +18,15 @@ import SwiftUI
 struct SatChartTests {
     @MainActor private static var retainedMapViews: [MKMapView] = []
 
+    @MainActor
+    @Test func launchBrandUsesAResolvableAppIconAsset() {
+        let icon = SatChartBrandAssets.appIcon
+        #expect(SatChartBrandAssets.tagline == "Know more.  Fish Smarter")
+        #expect(icon != nil)
+        #expect((icon?.size.width ?? 0) > 0)
+        #expect((icon?.size.height ?? 0) > 0)
+    }
+
     @Test func bundledOfflineDatabaseResourceCanBeOpened() throws {
         let url = OfflineDatabaseResource.bundledSQLiteURL()
         #expect(url != nil)
