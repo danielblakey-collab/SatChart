@@ -1385,7 +1385,7 @@ struct MapViewRepresentable: UIViewRepresentable {
             switch basemapChoice {
             case .topoOnline:
                 return max(maxZ, Double(USGSTopoOnlineTileOverlay.nativeMaximumZ))
-            case .districtsOffline, .appleSatellite, .bristolBaySatelliteOffline:
+            case .districtsOnline, .districtsOffline, .appleSatellite, .bristolBaySatelliteOffline:
                 return extendedOfflineMaxZ
             default:
                 return maxZ
@@ -1696,6 +1696,14 @@ struct MapViewRepresentable: UIViewRepresentable {
         func prepareForDismantle() {
             isDismantled = true
             zoomGate.cancel()
+            setRasterCameraMovementActive(false)
+            (noaaBasemapOverlay as? OnlineChartOverlay)?.stopLoading()
+            (pendingBasemapPredecessor as? OnlineChartOverlay)?.stopLoading()
+            BristolBaySatelliteTileStore.shared.setChartModeActive(false, owner: schedulerInteractionOwnerID)
+            chartHandoffRetry?.cancel()
+            chartHandoffRetry = nil
+            pendingOnlineDistrictVersions.values.forEach { $0.retry?.cancel() }
+            pendingOnlineDistrictVersions.removeAll()
             deferredSwiftUIUpdate = nil
             deferredCoverageReadiness.removeAll()
             coverageReadinessDrain.removeAll()
@@ -1717,7 +1725,24 @@ struct MapViewRepresentable: UIViewRepresentable {
             mapView = nil
         }
 
+        var onlineChartOverlayFactory: (OnlineChartSource) -> OnlineChartOverlay = { source in
+            source == .usgs ? USGSTopoOnlineTileOverlay() : NOAAOnlineTileOverlay()
+        }
+        private var chartHandoffLoading = false
+        private var chartHandoffRetry: DispatchWorkItem?
         private var onlineDistrictOverlays: [String: OnlineDistrictTileOverlay] = [:]
+        private final class OnlineVersionPreparation {
+            let overlay: OnlineDistrictTileOverlay
+            var isLoading = false
+            var retry: DispatchWorkItem?
+            var failures = 0
+            init(overlay: OnlineDistrictTileOverlay) { self.overlay = overlay }
+            deinit { retry?.cancel() }
+        }
+        private var pendingOnlineDistrictVersions: [DistrictID: OnlineVersionPreparation] = [:]
+        var onlineDistrictOverlayFactory: (OnlineDistrictMap) -> OnlineDistrictTileOverlay = {
+            OnlineDistrictTileOverlay(source: $0)
+        }
 
         // Basemap
         var basemapChoice: BasemapChoice = .districtsOnline {
@@ -2929,6 +2954,10 @@ struct MapViewRepresentable: UIViewRepresentable {
         // MARK: - Basemap
 
         func syncBasemap(on mapView: MKMapView) {
+            BristolBaySatelliteTileStore.shared.setChartModeActive(
+                basemapChoice == .topoOnline || basemapChoice == .noaaOnline,
+                owner: schedulerInteractionOwnerID
+            )
             switch basemapChoice {
             case .districtsOffline:
                 // Apple Satellite remains the broad backing map. The Bristol Bay
@@ -2967,27 +2996,121 @@ struct MapViewRepresentable: UIViewRepresentable {
                 syncOnlineNOAABasemap(on: mapView)
             }
             syncOnlineDistrictMaps(on: mapView)
+            if let chart = noaaBasemapOverlay as? OnlineChartOverlay, pendingBasemapPredecessor != nil {
+                prepareChartHandoff(chart, on: mapView)
+            }
         }
 
         private func syncOnlineDistrictMaps(on mapView: MKMapView) {
             let desired = basemapChoice == .districtsOnline
                 ? OnlineDistrictMapCatalog.selectedMaps(version: currentSelectedMapVersion)
                 : []
-            let wantedSlugs = Set(desired.map { $0.pack.slug })
-            for slug in Array(onlineDistrictOverlays.keys) where !wantedSlugs.contains(slug) {
-                guard let overlay = onlineDistrictOverlays.removeValue(forKey: slug) else { continue }
+            let wantedDistricts = Set(desired.map { $0.pack.district })
+            for (district, pending) in Array(pendingOnlineDistrictVersions)
+                where !wantedDistricts.contains(district) {
+                pending.retry?.cancel()
+                pendingOnlineDistrictVersions.removeValue(forKey: district)
+            }
+            for (slug, overlay) in Array(onlineDistrictOverlays)
+                where !wantedDistricts.contains(overlay.source.pack.district) {
+                onlineDistrictOverlays.removeValue(forKey: slug)
                 discardRenderer(for: overlay)
                 mapView.removeOverlay(overlay)
                 MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
-            for source in desired where onlineDistrictOverlays[source.pack.slug] == nil {
-                let overlay = OnlineDistrictTileOverlay(source: source)
+            for source in desired {
+                let district = source.pack.district
+                if let current = onlineDistrictOverlays.values.first(where: { $0.source.pack.district == district }) {
+                    if current.source.pack.slug == source.pack.slug {
+                        pendingOnlineDistrictVersions.removeValue(forKey: district)?.retry?.cancel()
+                        continue
+                    }
+                    if pendingOnlineDistrictVersions[district]?.overlay.source.pack.slug != source.pack.slug {
+                        pendingOnlineDistrictVersions[district]?.retry?.cancel()
+                        pendingOnlineDistrictVersions[district] = OnlineVersionPreparation(
+                            overlay: onlineDistrictOverlayFactory(source)
+                        )
+                    }
+                    prepareOnlineDistrictVersion(district, on: mapView)
+                    continue
+                }
+                let overlay = onlineDistrictOverlayFactory(source)
                 onlineDistrictOverlays[source.pack.slug] = overlay
                 MapStabilityDiagnostics.shared.increment(.overlayAddition)
                 if let basemap = noaaBasemapOverlay {
                     mapView.insertOverlay(overlay, above: basemap)
                 } else {
                     mapView.insertOverlay(overlay, at: 0, level: .aboveRoads)
+                }
+            }
+        }
+
+        private func prepareOnlineDistrictVersion(_ district: DistrictID, on mapView: MKMapView) {
+            guard !isDismantled, self.mapView === mapView, basemapChoice == .districtsOnline,
+                  !isCameraMovementActive,
+                  let pending = pendingOnlineDistrictVersions[district],
+                  !pending.isLoading, pending.retry == nil else { return }
+            pending.isLoading = true
+            let rect = mapView.visibleMapRect
+            let zoom = Int(zoomLevel(for: mapView).rounded())
+            pending.overlay.continuity.prepare(in: rect, zoom: zoom) {
+                [weak self, weak mapView, weak pending] ready in
+                DispatchQueue.main.async {
+                    guard let self, let mapView, let pending,
+                          !self.isDismantled, self.mapView === mapView,
+                          self.basemapChoice == .districtsOnline,
+                          self.pendingOnlineDistrictVersions[district] === pending else { return }
+                    pending.isLoading = false
+                    // SwiftUI may have recorded a newer selection before its deferred
+                    // reconciliation runs. That makes this completion obsolete too.
+                    guard OnlineDistrictMapCatalog.selectedMaps(version: self.currentSelectedMapVersion)
+                        .contains(where: { $0.pack.slug == pending.overlay.source.pack.slug }) else { return }
+                    // Settling invokes syncBasemap again for the new viewport.
+                    guard !self.isCameraMovementActive else { return }
+                    let candidate = pending.overlay.continuity
+                    let candidateFrame = candidate.snapshot()
+                    let hasImagery = candidateFrame.detail?.images.isEmpty == false
+                        || candidateFrame.overview?.images.isEmpty == false
+                    let isOffscreen = !mapView.visibleMapRect.intersects(candidate.bounds)
+                    // A missing/unpublished pyramid is not a replacement map.
+                    // Sparse transparent tiles within a real pyramid remain valid.
+                    if !ready || (!isOffscreen && !hasImagery) {
+                        pending.failures += 1
+                        let retry = DispatchWorkItem { [weak self, weak mapView, weak pending] in
+                            guard let self, let mapView, let pending,
+                                  self.pendingOnlineDistrictVersions[district] === pending else { return }
+                            pending.retry = nil
+                            self.prepareOnlineDistrictVersion(district, on: mapView)
+                        }
+                        pending.retry = retry
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + min(2, 0.25 * pow(2, Double(min(pending.failures, 3)))),
+                            execute: retry
+                        )
+                        return
+                    }
+                    let replacement = pending.overlay.continuity
+                    let currentRect = mapView.visibleMapRect
+                    let currentZoom = Int(self.zoomLevel(for: mapView).rounded())
+                    let expected = replacement.coordinates(in: currentRect, zoom: currentZoom,
+                                                           limit: RasterMapContinuity.maximumDetailTiles)
+                    let prepared = replacement.snapshot().detail?.coordinates
+                    let outsideCoverage = !currentRect.intersects(replacement.bounds)
+                    guard outsideCoverage || (!expected.isEmpty && prepared == expected) else {
+                        self.prepareOnlineDistrictVersion(district, on: mapView)
+                        return
+                    }
+                    guard let current = self.onlineDistrictOverlays.values.first(where: {
+                        $0.source.pack.district == district
+                    }) else { return }
+                    if let renderer = self.rendererByOverlayID[ObjectIdentifier(current)] as? RasterContinuityRenderer {
+                        guard renderer.replacePreparedContinuity(with: replacement) else { return }
+                    }
+                    let oldSlug = current.source.pack.slug
+                    current.adoptPreparedVersion(from: pending.overlay)
+                    self.onlineDistrictOverlays.removeValue(forKey: oldSlug)
+                    self.onlineDistrictOverlays[current.source.pack.slug] = current
+                    self.pendingOnlineDistrictVersions.removeValue(forKey: district)
                 }
             }
         }
@@ -3084,11 +3207,13 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         private func activeRasterContinuities(on mapView: MKMapView) -> [RasterMapContinuity] {
             mapView.overlays.compactMap { overlay in
+                if overlay === pendingBasemapPredecessor, overlay is OnlineChartOverlay { return nil }
                 if let backstop = overlay as? DistrictMapBackstopOverlay, backstop.isActive {
                     return backstop.continuity
                 }
                 if let online = overlay as? OnlineDistrictTileOverlay { return online.continuity }
                 if let bay = overlay as? BristolBaySatelliteTileOverlay { return bay.continuity }
+                if let chart = overlay as? OnlineChartOverlay { return chart.continuity }
                 return nil
             }
         }
@@ -3098,10 +3223,9 @@ struct MapViewRepresentable: UIViewRepresentable {
                 mapView.mapType = .satellite
             }
 
-            // District mode can zoom to 17. Keep the Bristol Bay layer present at
-            // those levels by overzooming its native zoom-15 imagery, matching the
-            // fixed-detail behavior of the downloaded district maps.
-            let displayMaximumZ = basemapChoice == .districtsOffline
+            // Both district modes display native zoom-15 parents at zooms 16–17.
+            // Keep the baywide backing imagery available at the same display zooms.
+            let displayMaximumZ = basemapChoice == .districtsOffline || basemapChoice == .districtsOnline
                 ? extendedOfflineMaxZForTiles
                 : maxZForTiles
             let wantedKey = "bristol-bay-satellite:online-overlay:z\(displayMaximumZ)"
@@ -3188,7 +3312,7 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return
             }
 
-            let overlay = USGSTopoOnlineTileOverlay(replacesMapContent: true)
+            let overlay = onlineChartOverlayFactory(.usgs)
             insertBasemapOverlay(overlay, on: mapView)
             adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: false, on: mapView)
         }
@@ -3243,7 +3367,7 @@ struct MapViewRepresentable: UIViewRepresentable {
             // NOAA chart tiles contain transparent water/background pixels. Keeping
             // MapKit's standard surface alive prevents those pixels from becoming
             // black or briefly exposing an unrelated replacement surface.
-            let overlay = NOAAOnlineTileOverlay(replacesMapContent: false)
+            let overlay = onlineChartOverlayFactory(.noaa)
             insertBasemapOverlay(overlay, on: mapView)
             adoptAttachedBasemap(overlay, key: wantedKey, waitForFirstTile: false, on: mapView)
         }
@@ -3263,6 +3387,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             waitForFirstTile: Bool,
             on mapView: MKMapView
         ) {
+            chartHandoffRetry?.cancel()
+            chartHandoffRetry = nil
+            chartHandoffLoading = false
             let lastKnownGood = pendingBasemapPredecessor ?? noaaBasemapOverlay
             if let superseded = noaaBasemapOverlay,
                superseded !== lastKnownGood,
@@ -3272,6 +3399,12 @@ struct MapViewRepresentable: UIViewRepresentable {
             pendingBasemapPredecessor = nil
             noaaBasemapOverlay = replacement
             noaaBasemapKey = key
+
+            if replacement is OnlineChartOverlay, let lastKnownGood, lastKnownGood !== replacement {
+                pendingBasemapPredecessor = lastKnownGood
+                (lastKnownGood as? OnlineChartOverlay)?.stopLoading(keepVisibleFrame: true)
+                return // syncBasemap starts a current-viewport readiness handoff.
+            }
 
             guard waitForFirstTile,
                   let replacement = replacement as? MBTilesOverlay,
@@ -3311,6 +3444,39 @@ struct MapViewRepresentable: UIViewRepresentable {
                 return
             }
             replacement.whenFirstTileIsReady(retirePredecessor)
+        }
+
+        private func prepareChartHandoff(_ chart: OnlineChartOverlay, on mapView: MKMapView) {
+            guard !isDismantled, self.mapView === mapView, !isCameraMovementActive,
+                  noaaBasemapOverlay === chart, !chartHandoffLoading, chartHandoffRetry == nil else { return }
+            chartHandoffLoading = true
+            let requestedRect = mapView.visibleMapRect
+            chart.continuity.prepare(in: requestedRect, zoom: Int(zoomLevel(for: mapView).rounded())) {
+                [weak self, weak chart, weak mapView] ready in
+                DispatchQueue.main.async {
+                    guard let self, let chart, let mapView, !self.isDismantled,
+                          self.mapView === mapView, self.noaaBasemapOverlay === chart else { return }
+                    self.chartHandoffLoading = false
+                    guard !self.isCameraMovementActive else { return }
+                    let drawn = mapView.window == nil ||
+                        (self.rendererByOverlayID[ObjectIdentifier(chart)] as? RasterContinuityRenderer)?
+                            .hasDrawnReadyCoverage(in: mapView.visibleMapRect) == true
+                    guard ready, drawn, requestedRect.contains(mapView.visibleMapRect) else {
+                        let retry = DispatchWorkItem { [weak self, weak chart, weak mapView] in
+                            guard let self, let chart, let mapView else { return }
+                            self.chartHandoffRetry = nil
+                            self.prepareChartHandoff(chart, on: mapView)
+                        }
+                        self.chartHandoffRetry = retry
+                        DispatchQueue.main.asyncAfter(deadline: .now() + (ready ? 0.1 : 1), execute: retry)
+                        return
+                    }
+                    if let previous = self.pendingBasemapPredecessor {
+                        self.removeBasemapOverlay(previous, from: mapView)
+                    }
+                    self.pendingBasemapPredecessor = nil
+                }
+            }
         }
 
         /// A replacement retires its known-good predecessor only when every tile
@@ -3458,6 +3624,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         }
 
         private func removeBasemapOverlay(_ overlay: MKTileOverlay, from mapView: MKMapView) {
+            (overlay as? OnlineChartOverlay)?.stopLoading()
             discardRenderer(for: overlay)
             mapView.removeOverlay(overlay)
             MapStabilityDiagnostics.shared.increment(.overlayRemoval)
@@ -4015,7 +4182,8 @@ struct MapViewRepresentable: UIViewRepresentable {
             }
 
             if let continuity = (overlay as? OnlineDistrictTileOverlay)?.continuity
-                ?? (overlay as? BristolBaySatelliteTileOverlay)?.continuity {
+                ?? (overlay as? BristolBaySatelliteTileOverlay)?.continuity
+                ?? (overlay as? OnlineChartOverlay)?.continuity {
                 let renderer = RasterContinuityRenderer(overlay: overlay, continuity: continuity)
                 renderer.setCameraMovementActive(isCameraMovementActive)
                 continuity.prepare(in: mapView.visibleMapRect, zoom: Int(zoomLevel(for: mapView).rounded()))

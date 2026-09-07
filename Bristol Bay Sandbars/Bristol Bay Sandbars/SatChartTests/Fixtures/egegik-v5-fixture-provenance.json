@@ -1,0 +1,29 @@
+{
+  "source": "Unmodified published Egegik v5 XYZ tiles at zoom 11, for online version-handoff tests",
+  "tiles": [
+    {
+      "file": "egegik-v5-xyz-11-127-613.png",
+      "sha256": "dd7c7e2e58f46f81c3f06859158383bd738e46ec188a9133a3ad5460be4d5210"
+    },
+    {
+      "file": "egegik-v5-xyz-11-127-614.png",
+      "sha256": "7e679c49440737cd513e51dbe06359b2fa85f6373973cd1287b55c3605783c3a"
+    },
+    {
+      "file": "egegik-v5-xyz-11-127-615.png",
+      "sha256": "706cb5d02b071fa9086393dbadf026679747f55978243ec7d6bf847091bfbcab"
+    },
+    {
+      "file": "egegik-v5-xyz-11-128-614.png",
+      "sha256": "07ba6df23ebba76d65cab6bc0b963efbcea1d278f93300166cbffeba6d94ef91"
+    },
+    {
+      "file": "egegik-v5-xyz-11-128-615.png",
+      "sha256": "41922393404ef2e299b1c5017e39a9f2836098a0808f4845aa8250aa470fb862"
+    },
+    {
+      "file": "egegik-v5-xyz-11-129-614.png",
+      "sha256": "2b409ee3a8cb6866102a07767abbb23be3a9a36ab426d4293c5f999d88b337cd"
+    }
+  ]
+}

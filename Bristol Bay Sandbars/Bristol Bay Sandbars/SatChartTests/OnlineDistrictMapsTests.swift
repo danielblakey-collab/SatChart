@@ -94,8 +94,8 @@ struct OnlineDistrictMapsTests {
         #expect(requests == 1 && completions == 1)
     }
 
-    @Test func mapSwitchingReusesUnchangedOverlaysAndRemovesOldVersions() throws {
-        let map = MKMapView()
+    @Test func mapSwitchingReusesUnchangedOverlaysAndRemovesOldVersions() async throws {
+        let map = MKMapView(frame: CGRect(x: 0, y: 0, width: 810, height: 1080))
         Self.retainedMapViews.append(map)
         let coordinator = MapViewRepresentable.Coordinator(
             minZForTiles: 4, maxZ: 15, maxZForTiles: 15,
@@ -105,6 +105,10 @@ struct OnlineDistrictMapsTests {
             onFollowStateChanged: { _ in }, onCursorUpdated: { _, _, _ in },
             onCursorTrackingStateChanged: { _ in }, onFishingSetDisplayPrompt: { _ in })
         defer { coordinator.prepareForDismantle() }
+        coordinator.mapView = map
+        // Offscreen version changes need no network requests.
+        map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                                          span: MKCoordinateSpan(latitudeDelta: 1, longitudeDelta: 1)), animated: false)
         let appearance = DistrictMapVisualSettings(brightness: 0.05, contrast: 1.3, gamma: 1, saturation: 1)
         coordinator.currentDistrictMapVisualSettingsBySlug = ["egegik_v4": appearance]
         coordinator.basemapChoice = .districtsOnline
@@ -112,13 +116,22 @@ struct OnlineDistrictMapsTests {
         coordinator.syncBasemap(on: map)
         let first = try #require(map.overlays.compactMap { $0 as? OnlineDistrictTileOverlay }.first)
         #expect(first.source.pack.slug == "egegik_v4")
+        // The background must remain available beneath online child zooms too.
+        let backing = try #require(map.overlays.compactMap { $0 as? BristolBaySatelliteTileOverlay }.first)
+        #expect(backing.maximumZ == 17)
+        #expect(first.continuity.maximumZoom == 15)
         coordinator.syncBasemap(on: map)
         #expect(map.overlays.compactMap { $0 as? OnlineDistrictTileOverlay }.first === first)
 
         for version in [5, 6, 7, 4] {
             coordinator.currentSelectedMapVersion = version
             coordinator.syncBasemap(on: map)
+            for _ in 0..<100 {
+                if first.source.version == version { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
             let districts = map.overlays.compactMap { $0 as? OnlineDistrictTileOverlay }
+            #expect(districts.first === first)
             #expect(districts.count == 1)
             #expect(districts.first?.source.pack.slug == "egegik_v\(version)")
             #expect(map.overlays.filter { $0 is BristolBaySatelliteTileOverlay }.count == 1)

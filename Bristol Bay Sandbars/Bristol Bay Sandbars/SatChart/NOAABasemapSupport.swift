@@ -359,6 +359,7 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     private var maximumDerivedKeys = 96
     private var maximumCallbacksPerKey = 32
     private var observers: [NSObjectProtocol] = []
+    private var chartOwners: Set<UUID> = []
 
     // Accessed only on writeQueue after initialization.
     private var diskEntries: [String: DiskEntry] = [:]
@@ -748,10 +749,22 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
         }
     }
 
+    /// USGS/NOAA use the existing online allowance rather than adding their
+    /// resident frames on top of a full, inactive satellite cache.
+    func setChartModeActive(_ active: Bool, owner: UUID) {
+        stateQueue.async { [self] in
+            guard chartOwners.contains(owner) != active else { return }
+            if active { chartOwners.insert(owner) } else { chartOwners.remove(owner) }
+            applyResourceProfileLocked(MBTilesResourceProfile.current())
+        }
+    }
+
     private func applyResourceProfileLocked(_ profile: MBTilesResourceProfile) {
         let totalMemory = profile.onlineSatelliteCacheBytes
-        let sourceMemory = max(4 * 1_024 * 1_024, (totalMemory * 3) / 4)
-        let derivedMemory = max(2 * 1_024 * 1_024, totalMemory - sourceMemory)
+        let sourceMemory = chartOwners.isEmpty
+            ? max(4 * 1_024 * 1_024, (totalMemory * 3) / 4) : 2 * 1_024 * 1_024
+        let derivedMemory = chartOwners.isEmpty
+            ? max(2 * 1_024 * 1_024, totalMemory - sourceMemory) : 0
         sourceMemoryCache.updateLimits(
             costLimit: sourceMemory,
             countLimit: max(64, sourceMemory / (64 * 1_024))
@@ -814,108 +827,16 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     }
 }
 
-final class NOAAOnlineTileOverlay: MKTileOverlay {
-    private static let exportBaseURL = URL(string:
-        "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export"
-    )!
-
-    private static let worldHalfWidth: Double = 20_037_508.342789244
-
-    init(replacesMapContent: Bool = true) {
-        super.init(urlTemplate: nil)
-        canReplaceMapContent = replacesMapContent
-        tileSize = CGSize(width: 256, height: 256)
-        minimumZ = 0
-        maximumZ = 18
-    }
-
-    override func url(forTilePath path: MKTileOverlayPath) -> URL {
-        let scale = max(1, Int(path.contentScaleFactor.rounded()))
-        let pixelSize = 256 * scale
-        let dpi = 96 * scale
-
-        let bbox = Self.webMercatorBBox(for: path)
-
-        var comps = URLComponents(url: Self.exportBaseURL, resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "bbox", value: "\(bbox.minX),\(bbox.minY),\(bbox.maxX),\(bbox.maxY)"),
-            URLQueryItem(name: "bboxSR", value: "102100"),
-            URLQueryItem(name: "imageSR", value: "102100"),
-            URLQueryItem(name: "size", value: "\(pixelSize),\(pixelSize)"),
-            URLQueryItem(name: "dpi", value: "\(dpi)"),
-            URLQueryItem(name: "transparent", value: "true"),
-            URLQueryItem(name: "format", value: "png32"),
-            URLQueryItem(name: "f", value: "image")
-        ]
-        return comps.url!
-    }
-
-    private static func webMercatorBBox(for path: MKTileOverlayPath) -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
-        let z = path.z
-        let tilesPerSide = Double(1 << z)
-        let worldWidth = worldHalfWidth * 2.0
-        let tileWidth = worldWidth / tilesPerSide
-
-        let minX = -worldHalfWidth + (Double(path.x) * tileWidth)
-        let maxX = minX + tileWidth
-        let maxY = worldHalfWidth - (Double(path.y) * tileWidth)
-        let minY = maxY - tileWidth
-
-        return (minX, minY, maxX, maxY)
+final class NOAAOnlineTileOverlay: OnlineChartOverlay {
+    init(replacesMapContent: Bool = false, store: OnlineChartTileStore = .shared) {
+        super.init(source: .noaa, store: store)
     }
 }
 
-
-final class USGSTopoOnlineTileOverlay: MKTileOverlay {
+final class USGSTopoOnlineTileOverlay: OnlineChartOverlay {
     static let nativeMaximumZ: Int = 23
-
-    private static let exportBaseURL = URL(string:
-        "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/export"
-    )!
-
-    private static let worldHalfWidth: Double = 20_037_508.342789244
-
-    init(replacesMapContent: Bool = true) {
-        super.init(urlTemplate: nil)
-        canReplaceMapContent = replacesMapContent
-        tileSize = CGSize(width: 256, height: 256)
-        minimumZ = 0
-        maximumZ = Self.nativeMaximumZ
-    }
-
-    override func url(forTilePath path: MKTileOverlayPath) -> URL {
-        let scale = max(1, Int(path.contentScaleFactor.rounded()))
-        let pixelSize = 256 * scale
-        let dpi = 96 * scale
-
-        let bbox = Self.webMercatorBBox(for: path)
-
-        var comps = URLComponents(url: Self.exportBaseURL, resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "bbox", value: "\(bbox.minX),\(bbox.minY),\(bbox.maxX),\(bbox.maxY)"),
-            URLQueryItem(name: "bboxSR", value: "102100"),
-            URLQueryItem(name: "imageSR", value: "102100"),
-            URLQueryItem(name: "size", value: "\(pixelSize),\(pixelSize)"),
-            URLQueryItem(name: "dpi", value: "\(dpi)"),
-            URLQueryItem(name: "transparent", value: "false"),
-            URLQueryItem(name: "format", value: "png32"),
-            URLQueryItem(name: "f", value: "image")
-        ]
-        return comps.url!
-    }
-
-    private static func webMercatorBBox(for path: MKTileOverlayPath) -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
-        let z = path.z
-        let tilesPerSide = Double(1 << z)
-        let worldWidth = worldHalfWidth * 2.0
-        let tileWidth = worldWidth / tilesPerSide
-
-        let minX = -worldHalfWidth + (Double(path.x) * tileWidth)
-        let maxX = minX + tileWidth
-        let maxY = worldHalfWidth - (Double(path.y) * tileWidth)
-        let minY = maxY - tileWidth
-
-        return (minX, minY, maxX, maxY)
+    init(replacesMapContent: Bool = false, store: OnlineChartTileStore = .shared) {
+        super.init(source: .usgs, store: store)
     }
 }
 

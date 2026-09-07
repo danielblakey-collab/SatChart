@@ -25,6 +25,110 @@ final class RasterContinuityPresentationTests: XCTestCase {
                                    continuity: overlay.continuity, name: "online")
     }
 
+    nonisolated private final class NativeRequests: @unchecked Sendable {
+        private let lock = NSLock()
+        private var zooms: [Int] = []
+        func record(_ url: URL) {
+            lock.lock(); defer { lock.unlock() }
+            zooms.append(Int(url.pathComponents.suffix(3).first!)!)
+        }
+        var levels: Set<Int> {
+            lock.lock(); defer { lock.unlock() }
+            return Set(zooms)
+        }
+    }
+    private static var retainedCoordinators: [MapViewRepresentable.Coordinator] = []
+
+    func testOnlineChildZoomsKeepNativePixelsAndStopAtSeventeen() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        Self.retainedWindows.append(window)
+        let controller = UIViewController()
+        let map = MKMapView(frame: window.bounds)
+        controller.view = map
+        window.rootViewController = controller
+        window.windowLevel = .normal + 1
+        window.makeKeyAndVisible()
+        map.mapType = .satellite
+        map.showsCompass = false
+        map.pointOfInterestFilter = .excludingAll
+        let coordinator = MapViewRepresentable.Coordinator(
+            minZForTiles: 4, maxZ: 15, maxZForTiles: 15,
+            extendedOfflineMaxZ: 17, extendedOfflineMaxZForTiles: 17,
+            initialLaunchZoom: 15, initialCursorTrackingUser: true,
+            onDistanceText: { _ in }, onSpeedText: { _ in }, onMetersPerPoint: { _ in },
+            onFollowStateChanged: { _ in }, onCursorUpdated: { _, _, _ in },
+            onCursorTrackingStateChanged: { _ in }, onFishingSetDisplayPrompt: { _ in })
+        Self.retainedCoordinators.append(coordinator)
+        coordinator.mapView = map
+        coordinator.basemapChoice = .districtsOnline
+        defer {
+            coordinator.prepareForDismantle()
+            window.isHidden = true
+            previousKey?.makeKey()
+            map.delegate = nil
+        }
+        let source = try XCTUnwrap(OnlineDistrictMapCatalog.maps.first)
+        let center = MKMapPoint(x: source.bounds.midX, y: source.bounds.midY)
+        func rect(at zoom: Double) -> MKMapRect {
+            let scale = MKMapSize.world.width / (256 * pow(2, zoom))
+            let width = Double(map.bounds.width) * scale
+            let height = Double(map.bounds.height) * scale
+            return MKMapRect(x: center.x - width / 2, y: center.y - height / 2,
+                             width: width, height: height)
+        }
+        func displayedZoom() -> Double {
+            log2(MKMapSize.world.width * Double(map.bounds.width) / (256 * map.visibleMapRect.width))
+        }
+        map.setVisibleMapRect(rect(at: 15), animated: false)
+        let requests = NativeRequests()
+        let png = Self.redPNG()
+        let overlay = OnlineDistrictTileOverlay(source: source) { url, _, result in
+            requests.record(url)
+            result(png, nil)
+        }
+        let renderer = coordinator.mapView(map, rendererFor: overlay)
+        let delegate = Delegate(renderer)
+        map.delegate = delegate
+        map.addOverlay(overlay, level: .aboveLabels)
+        let ready = await withCheckedContinuation { continuation in
+            overlay.continuity.prepare(in: map.visibleMapRect, zoom: 15) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertTrue(ready)
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(displayedZoom(), 15, accuracy: 0.05)
+        XCTAssertGreaterThan(capture(map).redFraction, 0.99)
+        var minimumCoverage = 1.0
+        for (target, delta) in [(16.0, 1), (17.0, 1), (17.0, 1), (16.0, -1)] {
+            coordinator.zoom(map, delta: delta)
+            for _ in 0..<24 {
+                try await Task.sleep(for: .milliseconds(25))
+                minimumCoverage = min(minimumCoverage, capture(map).redFraction)
+            }
+            XCTAssertEqual(displayedZoom(), target, accuracy: 0.05)
+            coordinator.clampZoomIfNeeded(map)
+            XCTAssertEqual(displayedZoom(), target, accuracy: 0.05,
+                           "Settling a pinch at zoom 16/17 must not return online maps to zoom 15")
+            XCTAssertTrue(coordinator.mapView(map, rendererFor: overlay) === renderer)
+            let detail = try XCTUnwrap(overlay.continuity.snapshot().detail)
+            XCTAssertFalse(detail.images.isEmpty)
+            XCTAssertTrue(detail.coordinates.allSatisfy { $0.z == 15 })
+        }
+        // Pinch gestures use the same upper limit as the plus button.
+        map.setVisibleMapRect(rect(at: 18), animated: false)
+        coordinator.clampZoomIfNeeded(map)
+        XCTAssertEqual(displayedZoom(), 17, accuracy: 0.05)
+        XCTAssertEqual(requests.levels.max(), 15, "Zoom 16/17 must request only native parent tiles")
+        XCTAssertGreaterThan(minimumCoverage, 0.99, "Child zooms must preserve district imagery")
+        attach(capture(map).image, name: "online-native-parents-at-zoom-17")
+        print("ONLINE_CHILD_ZOOM", "96 sampled frames; minimum coverage:", minimumCoverage,
+              "maximum source zoom:", requests.levels.max() ?? -1)
+        _ = delegate
+    }
+
     func testOfflinePixelsPersistAcrossAnimatedZooms() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("continuity-\(UUID()).mbtiles")
         var db: OpaquePointer?
