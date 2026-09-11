@@ -248,7 +248,9 @@ private struct PackCard: View {
             }
             .frame(height: 280)
 
-            if let previewDateLabel = pack.previewDateLabel {
+            if let captureTide = pack.captureTide {
+                OfflineMapCaptureTideCaption(tide: captureTide)
+            } else if let previewDateLabel = pack.previewDateLabel {
                 Text(previewDateLabel)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.white.opacity(0.78))
@@ -349,5 +351,39 @@ private struct PackCard: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .onAppear(perform: onAppear)
+    }
+}
+
+private struct OfflineMapCaptureTideCaption: View {
+    let tide: OfflineMapCaptureTide
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(tide.dateLabel) · \(tide.timeLabel)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
+                .accessibilityLabel("Image captured \(tide.dateLabel) at \(tide.timeLabel)")
+
+            Text("Estimated height at capture: \(tide.estimatedHeightFeet, specifier: "%.1f") ft MLLW")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .accessibilityLabel("Estimated tide height when image was captured: \(tide.estimatedHeightFeet, specifier: "%.1f") feet relative to Mean Lower Low Water")
+
+            Text("Predicted tide: \(tide.stateLabel)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Text(tide.relativeEventLabel)
+                .foregroundStyle(.white.opacity(0.85))
+            Text(tide.eventLabel)
+                .foregroundStyle(.white.opacity(0.78))
+
+            Link(tide.station.label, destination: tide.station.url)
+                .foregroundStyle(Color(red: 0.50, green: 0.75, blue: 1))
+                .padding(.vertical, 4)
+                .accessibilityLabel("NOAA tide predictions, \(tide.station.name), station \(tide.station.id)")
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

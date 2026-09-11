@@ -344,6 +344,7 @@ struct MapView: View {
 
     @StateObject private var locationManager = LocationManager()
     @StateObject private var offline = OfflineMapsManager.shared
+    @StateObject private var onlineDistrictAvailability = OnlineDistrictMapAvailability.shared
 
     @StateObject private var pinSettings = RadioGroupPinSettings()
     @EnvironmentObject private var authStore: AuthStateStore
@@ -533,13 +534,13 @@ struct MapView: View {
 
     private var globalMapVersionCount: Int {
         basemapChoice == .districtsOnline
-            ? OnlineDistrictMapCatalog.versions.count
+            ? OnlineDistrictMapCatalog.versions(in: onlineDistrictAvailability.maps).count
             : offline.maximumDownloadedDistrictMapVersionCount()
     }
 
     private var selectedMapCycleVersion: Int {
         basemapChoice == .districtsOnline
-            ? OnlineDistrictMapCatalog.normalizedVersion(selectedOnlineMapVersion)
+            ? OnlineDistrictMapCatalog.normalizedVersion(selectedOnlineMapVersion, in: onlineDistrictAvailability.maps)
             : max(1, min(selectedMapVersion, globalMapVersionCount))
     }
 
@@ -548,7 +549,7 @@ struct MapView: View {
             get: { selectedMapCycleVersion },
             set: {
                 if basemapChoice == .districtsOnline {
-                    selectedOnlineMapVersion = OnlineDistrictMapCatalog.normalizedVersion($0)
+                    selectedOnlineMapVersion = OnlineDistrictMapCatalog.normalizedVersion($0, in: onlineDistrictAvailability.maps)
                 } else {
                     selectedMapVersion = max(1, $0)
                 }
@@ -562,7 +563,7 @@ struct MapView: View {
 
     private func cycleToNextMapVersion() {
         if basemapChoice == .districtsOnline {
-            selectedOnlineMapVersion = OnlineDistrictMapCatalog.nextVersion(after: selectedMapCycleVersion)
+            selectedOnlineMapVersion = OnlineDistrictMapCatalog.nextVersion(after: selectedMapCycleVersion, in: onlineDistrictAvailability.maps)
             return
         }
         let maxVersion = globalMapVersionCount
@@ -1152,6 +1153,7 @@ struct MapView: View {
         syncCursorInputsFromCursor()
         normalizeSSTSettings()
         refreshSSTAvailability()
+        if basemapChoice == .districtsOnline { onlineDistrictAvailability.refreshIfNeeded() }
         smartLogbookStore.reloadFromDisk()
         ensureWaypointDefaultsAndLoad()
     }
@@ -1190,6 +1192,7 @@ struct MapView: View {
             zoomOutRequest: $zoomOutReq,
             basemapChoice: basemapChoice,
             offlineInventoryRevision: offline.downloadedTick,
+            onlineDistrictMaps: onlineDistrictAvailability.maps,
             districtMapVisualSettingsBySlug: districtMapVisualSettingsBySlug,
             sstEnabled: sstEnabled,
             sstOpacity: sstOpacity,
@@ -1202,6 +1205,10 @@ struct MapView: View {
         )
         .ignoresSafeArea()
         .onAppear(perform: handleMapAppear)
+        .onChange(of: basemapChoiceRaw) { _ in
+            if basemapChoice == .districtsOnline { onlineDistrictAvailability.refreshIfNeeded() }
+            else { onlineDistrictAvailability.cancelRefresh() }
+        }
     }
 
     // MARK: - HUD + controls (unchanged UI)
@@ -2886,6 +2893,13 @@ struct MapView: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .opacity(globalMapVersionCount > 1 ? 1.0 : 0.72)
+        .contextMenu {
+            if basemapChoice == .districtsOnline {
+                Button("Refresh online map versions", systemImage: "arrow.clockwise") {
+                    onlineDistrictAvailability.refreshIfNeeded(force: true)
+                }
+            }
+        }
         .accessibilityLabel(basemapChoice == .districtsOnline ? "Cycle online district map version" : "Cycle downloaded map version")
         .accessibilityValue(basemapChoice == .districtsOnline
             ? "Map version \(selectedMapCycleVersion), \(globalMapVersionCount) online versions available"
@@ -3451,11 +3465,13 @@ struct MapView: View {
             .onChange(of: scenePhase) { phase in
                 switch phase {
                 case .background:
+                    onlineDistrictAvailability.cancelRefresh()
                     kdlgRadioPlayer.stop()
                     suspendLiveSharingForBackground()
                 case .inactive:
                     suspendLiveSharingForBackground()
                 case .active:
+                    if basemapChoice == .districtsOnline { onlineDistrictAvailability.refreshIfNeeded() }
                     reconcileForegroundLiveSharing(reason: "scene became active")
                 @unknown default:
                     break

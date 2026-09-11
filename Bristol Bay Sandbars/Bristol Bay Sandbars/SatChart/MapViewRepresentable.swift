@@ -484,6 +484,7 @@ struct MapViewRepresentable: UIViewRepresentable {
     @Binding var zoomOutRequest: Int
 
     let basemapChoice: BasemapChoice
+    let onlineDistrictMaps: [OnlineDistrictMap]
     let offlineInventoryRevision: Int
     let districtMapVisualSettingsBySlug: [String: DistrictMapVisualSettings]
     let sstEnabled: Bool
@@ -518,6 +519,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         zoomOutRequest: Binding<Int>,
         basemapChoice: BasemapChoice,
         offlineInventoryRevision: Int,
+        onlineDistrictMaps: [OnlineDistrictMap] = OnlineDistrictMapCatalog.maps,
         districtMapVisualSettingsBySlug: [String: DistrictMapVisualSettings],
         sstEnabled: Bool,
         sstOpacity: Double,
@@ -550,6 +552,7 @@ struct MapViewRepresentable: UIViewRepresentable {
             self._zoomOutRequest = zoomOutRequest
             self.basemapChoice = basemapChoice
             self.offlineInventoryRevision = offlineInventoryRevision
+            self.onlineDistrictMaps = onlineDistrictMaps
             self.districtMapVisualSettingsBySlug = districtMapVisualSettingsBySlug.mapValues {
                 $0.normalized
             }
@@ -647,6 +650,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         map.userTrackingMode = .none
 
         // Boundaries + overlays
+        context.coordinator.availableOnlineDistrictMaps = onlineDistrictMaps
         context.coordinator.currentSelectedMapVersion = selectedMapVersion
         context.coordinator.lastSelectedMapVersion = selectedMapVersion
         installDistrictBoundaries(on: map, coordinator: context.coordinator)
@@ -746,6 +750,8 @@ struct MapViewRepresentable: UIViewRepresentable {
             context.coordinator.currentSelectedMapVersion = selectedMapVersion
         }
 
+        let onlineInventoryChanged = context.coordinator.availableOnlineDistrictMaps != onlineDistrictMaps
+        context.coordinator.availableOnlineDistrictMaps = onlineDistrictMaps
         let offlineInventoryChanged = context.coordinator.lastOfflineInventoryRevision
             != offlineInventoryRevision
         if offlineInventoryChanged {
@@ -756,6 +762,7 @@ struct MapViewRepresentable: UIViewRepresentable {
             || basemapChoiceChanged
             || selectedMapVersionChanged
             || offlineInventoryChanged
+            || onlineInventoryChanged
             || !context.coordinator.hasSynchronizedSwiftUIMapPresentation
         if offlinePresentationChanged {
             // Keep only the selected version for each district installed, and only
@@ -1702,7 +1709,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             BristolBaySatelliteTileStore.shared.setChartModeActive(false, owner: schedulerInteractionOwnerID)
             chartHandoffRetry?.cancel()
             chartHandoffRetry = nil
-            pendingOnlineDistrictVersions.values.forEach { $0.retry?.cancel() }
+            onlineDistrictOverlays.values.forEach { $0.continuity.invalidate() }
+            onlineDistrictOverlays.removeAll()
+            pendingOnlineDistrictVersions.values.forEach { $0.retry?.cancel(); $0.overlay.continuity.invalidate() }
             pendingOnlineDistrictVersions.removeAll()
             deferredSwiftUIUpdate = nil
             deferredCoverageReadiness.removeAll()
@@ -1730,6 +1739,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         }
         private var chartHandoffLoading = false
         private var chartHandoffRetry: DispatchWorkItem?
+        var availableOnlineDistrictMaps = OnlineDistrictMapCatalog.maps
         private var onlineDistrictOverlays: [String: OnlineDistrictTileOverlay] = [:]
         private final class OnlineVersionPreparation {
             let overlay: OnlineDistrictTileOverlay
@@ -3003,7 +3013,7 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         private func syncOnlineDistrictMaps(on mapView: MKMapView) {
             let desired = basemapChoice == .districtsOnline
-                ? OnlineDistrictMapCatalog.selectedMaps(version: currentSelectedMapVersion)
+                ? OnlineDistrictMapCatalog.selectedMaps(version: currentSelectedMapVersion, in: availableOnlineDistrictMaps)
                 : []
             let wantedDistricts = Set(desired.map { $0.pack.district })
             for (district, pending) in Array(pendingOnlineDistrictVersions)
@@ -3014,18 +3024,27 @@ struct MapViewRepresentable: UIViewRepresentable {
             for (slug, overlay) in Array(onlineDistrictOverlays)
                 where !wantedDistricts.contains(overlay.source.pack.district) {
                 onlineDistrictOverlays.removeValue(forKey: slug)
+                overlay.continuity.invalidate()
                 discardRenderer(for: overlay)
                 mapView.removeOverlay(overlay)
                 MapStabilityDiagnostics.shared.increment(.overlayRemoval)
             }
             for source in desired {
                 let district = source.pack.district
+                if let stale = onlineDistrictOverlays.values.first(where: { $0.source.pack.district == district }),
+                   !mapView.visibleMapRect.intersects(stale.continuity.bounds), stale.continuity.snapshot().isReady {
+                    pendingOnlineDistrictVersions.removeValue(forKey: district)?.retry?.cancel()
+                    stale.continuity.invalidate()
+                    onlineDistrictOverlays.removeValue(forKey: stale.source.pack.slug)
+                    discardRenderer(for: stale)
+                    mapView.removeOverlay(stale)
+                }
                 if let current = onlineDistrictOverlays.values.first(where: { $0.source.pack.district == district }) {
-                    if current.source.pack.slug == source.pack.slug {
+                    if current.source.tilePrefix == source.tilePrefix {
                         pendingOnlineDistrictVersions.removeValue(forKey: district)?.retry?.cancel()
                         continue
                     }
-                    if pendingOnlineDistrictVersions[district]?.overlay.source.pack.slug != source.pack.slug {
+                    if pendingOnlineDistrictVersions[district]?.overlay.source.tilePrefix != source.tilePrefix {
                         pendingOnlineDistrictVersions[district]?.retry?.cancel()
                         pendingOnlineDistrictVersions[district] = OnlineVersionPreparation(
                             overlay: onlineDistrictOverlayFactory(source)
@@ -3063,8 +3082,8 @@ struct MapViewRepresentable: UIViewRepresentable {
                     pending.isLoading = false
                     // SwiftUI may have recorded a newer selection before its deferred
                     // reconciliation runs. That makes this completion obsolete too.
-                    guard OnlineDistrictMapCatalog.selectedMaps(version: self.currentSelectedMapVersion)
-                        .contains(where: { $0.pack.slug == pending.overlay.source.pack.slug }) else { return }
+                    guard OnlineDistrictMapCatalog.selectedMaps(version: self.currentSelectedMapVersion, in: self.availableOnlineDistrictMaps)
+                        .contains(where: { $0.tilePrefix == pending.overlay.source.tilePrefix }) else { return }
                     // Settling invokes syncBasemap again for the new viewport.
                     guard !self.isCameraMovementActive else { return }
                     let candidate = pending.overlay.continuity
@@ -3091,12 +3110,11 @@ struct MapViewRepresentable: UIViewRepresentable {
                     }
                     let replacement = pending.overlay.continuity
                     let currentRect = mapView.visibleMapRect
-                    let currentZoom = Int(self.zoomLevel(for: mapView).rounded())
-                    let expected = replacement.coordinates(in: currentRect, zoom: currentZoom,
-                                                           limit: RasterMapContinuity.maximumDetailTiles)
-                    let prepared = replacement.snapshot().detail?.coordinates
+                    let frame = replacement.snapshot().detail
                     let outsideCoverage = !currentRect.intersects(replacement.bounds)
-                    guard outsideCoverage || (!expected.isEmpty && prepared == expected) else {
+                    let requestedCoverage = currentRect.intersection(replacement.bounds)
+                    let coversCurrentViewport = frame?.mapRect.contains(requestedCoverage) == true
+                    guard outsideCoverage || coversCurrentViewport else {
                         self.prepareOnlineDistrictVersion(district, on: mapView)
                         return
                     }

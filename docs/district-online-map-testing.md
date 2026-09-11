@@ -7,20 +7,20 @@ Branch: `codex/refine-landscape-top-hud`
 ## Behavior
 
 - The previous Bristol Bay online option is now **Districts Online**. Existing saved selections migrate automatically because the stored raw value remains `bristolBaySatelliteOnline`.
-- **Map v4 → v5 → v6 → v7 → v4** selects published Egegik XYZ imagery, independently of downloads. The online version is saved separately from the offline selection.
+- **Map v#** cycles the union of discovered online version numbers, independently of downloads. Egegik v3–v7 and Ugashik v4–v6 are currently published. Each district uses the selected number if available, otherwise its lowest published version. The online selection is saved separately from the offline selection.
 - **Download Offline Maps → Egegik** includes v4, v5, v6, and v7 alongside the existing versions. Download, validation, installation, cancellation, and deletion use the existing MBTiles manager.
-- Online district imagery sits above the existing baywide satellite background. Only Egegik currently has published district XYZ folders; other areas retain the background imagery.
-- Online maps share this branch’s existing bounded tile cache and request queue. Each online version has its own cache namespace. Changing map mode removes district online overlays; repeated updates retain the current overlay.
+- Online district imagery sits above the existing baywide satellite background. All five districts support XYZ versions 1–15. Districts without a published pyramid retain the background imagery.
+- Online maps share this branch’s existing bounded tile cache and request queue. Each online prefix has its own cache namespace. Changing map mode removes district online overlays; repeated updates retain the current overlay. At most one selected overlay per district is attached, regardless of how many versions are published.
 - The app reads the derived MBTiles and XYZ PNG outputs. It does not read the COG master TIFF directly.
 
 ## Try it in Xcode
 
 1. Open `Bristol Bay Sandbars/Bristol Bay Sandbars/SatChart.xcodeproj` in the SatChart-Dev working copy and run the `SatChart` scheme.
 2. Choose **Districts Online** and pan to Egegik, approximately **58.246° N, 157.454° W**. No district downloads are needed.
-3. Tap **Map v#** through v4, v5, v6, and v7. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses zoom-15 parents for display zooms 16–17, matching Districts Offline. Both the plus button and pinch gestures stop at display zoom 17.
+3. Tap **Map v#** through the discovered versions (currently v3–v7), then pan to Ugashik to compare its v4–v6 imagery. Long-press the button and choose **Refresh online map versions** after uploading a new pyramid. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses zoom-15 parents for display zooms 16–17, matching Districts Offline. Both the plus button and pinch gestures stop at display zoom 17.
 4. Open **Menu → Download Offline Maps** and download the desired Egegik variants. Confirm the preview, completed status, and download size.
 5. Choose **Districts Offline** and cycle through the downloaded maps. Its existing selector cycles downloaded entries; when only v4–v7 are downloaded, its cycle positions 1–4 correspond to those four packages.
-6. Test the downloaded district area in airplane mode. Return online, switch back to **Districts Online**, and confirm its previous online selection is restored. Switch to Satellite or NOAA and check that no Egegik online imagery remains.
+6. Test the downloaded district area in airplane mode. Return online, switch back to **Districts Online**, and confirm its previous online selection is restored. Switch to Satellite or NOAA and check that no district online imagery remains.
 
 If the version button is hidden, enable **Settings → Screen Layout & Options → Map Version Selector**.
 
@@ -39,13 +39,15 @@ PNG tiles are 256 × 256. MBTiles rows are TMS; online folders use XYZ without a
 
 ## Adding future districts or versions
 
-Add downloadable versions in `DistrictID.offlinePackVersions`. Add verified online pyramids, their native zoom range, and their actual bounds in `OnlineDistrictMapCatalog.maps`. Do not enable online versions solely because an MBTiles file exists: the corresponding `<slug>_xyz/{z}/{x}/{y}.png` objects must also be published. District keys remain unchanged.
+Publish complete XYZ pyramids using the naming and geometry contract in [Publishing district XYZ maps](publishing-district-xyz.md). Versions 1–15 for all five existing district keys are discovered automatically; no app edit or release is required for another online version within that contract. Offline download cards are still curated in `DistrictID.offlinePackVersions`.
 
-The catalog presents the union of published version numbers. For a district without the selected number, it uses that district's first published online version.
+The app checks public z4 tile headers using two workers, with no image-body download or decoding. It scans when entering Districts Online or foregrounding that mode, throttled to five minutes after a successful scan. A long-press on **Map v#** offers a manual refresh. Cached availability persists across launches; connection/server failures retain known versions, while confirmed missing pyramids are removed. This is publication discovery, not exhaustive tile validation.
+
+All online districts share a 32 MiB reservation budget for retained, incoming, and frozen continuity frames. Each provider limits detail to 24 tiles and overview to four small tiles, selecting a complete coarser level if needed. Offscreen retained frames are released after a settled pan. Source compression/cache memory and MapKit backing resources are separate from this budget; it is not a bound on total app RAM.
 
 ## Integration status
 
-The district-map feature was added to the existing `codex/refine-landscape-top-hud` working copy. The appearance editor, offline MBTiles engine, overlay implementation, and download manager were preserved byte-for-byte. The existing deferred map updates, renderer-opacity cleanup, and map diagnostics are retained. The initial map and zoom work was committed as `6a965dbc`; branding followed in `6cc768ee`. The online version-handoff improvement below is a subsequent change on the same branch.
+The initial district-map feature was added to the existing `codex/refine-landscape-top-hud` working copy. That initial integration preserved the appearance editor, offline MBTiles engine, overlay implementation, and download manager. The existing deferred map updates, renderer-opacity cleanup, and map diagnostics are retained. The initial map and zoom work was committed as `6a965dbc`; branding followed in `6cc768ee`. The online version-handoff improvement below is a subsequent change on the same branch.
 
 ## Combined-branch verification
 
@@ -70,3 +72,11 @@ Districts Online now shares the offline camera limit of 17. Its existing continu
 The live MapKit child-zoom regression exercises 15 → 16 → 17, an extra plus tap at the limit, zooming out, and the pinch clamp. It checks visible imagery throughout the animation, renderer identity, and that network source requests never exceed zoom 15.
 
 Child-zoom verification: the iPad simulator build and all 29 selected tests passed across the online catalog, version handoff, raster continuity, and presentation suites. The new live test sampled 96 zoom frames with 100% coverage of its opaque test area and a maximum requested source zoom of 15. The real v4/v5 version-switch check also retained all 96 sampled frames. Physical-device acceptance should repeat plus-button and pinch zooms to 16/17, then switch versions at that scale.
+
+## Automatic district discovery verification — September 8, 2026
+
+The final iPad simulator build passed. All 164 selected checks passed across the discovery, five-district memory, catalog, version handoff, Egegik real-tile rendering, continuity, USGS/NOAA, MBTiles hardening, and general app regression suites. The expanded catalog and smaller per-provider tile allowance required updating two older fixtures: explicit v4 selection in the layer-order check, and a z12 viewport that fits the detail allowance in the sharpening check.
+
+The five-district stress case retained 19 MiB of decoded frame reservations under the shared 32 MiB cap. The live MapKit version-switch check sampled 96 real Egegik v4/v5 frames without detected imagery gaps; the child-zoom check sampled another 96 frames with full opaque-area coverage and source requests capped at z15. These are simulator checks, not total-RAM measurements on an older physical device.
+
+A separate live run of the production URLSession discovery code, starting from an empty isolated cache, found exactly eight R2 pyramids in about 14 seconds: Egegik v3–v7 and Ugashik v4–v6. The scan used public HEAD requests only. Future v1/v15 discovery, alias handling, missing versions, interrupted scans, persistent availability, and all five district keys were exercised with controlled responses. `git diff --check` passed.

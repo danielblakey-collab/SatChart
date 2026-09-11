@@ -105,6 +105,7 @@ struct OfflinePack: Identifiable, Hashable {
     }
 
     var previewDateLabel: String? {
+        if let captureTide { return captureTide.dateLabel }
         switch slug {
         case "togiak",
             "bristol_bay", "bristol-bay",
@@ -120,7 +121,7 @@ struct OfflinePack: Identifiable, Hashable {
         case "egegik_v2":
             return "8/17/25"
 
-        case "egegik_v3", "ugashik_v3":
+        case "ugashik_v3":
             return "5/9/26"
 
         case "ugashik_v2":

@@ -84,19 +84,24 @@ final class EgegikRasterRegressionTests: XCTestCase {
         let overlay = online()
         let source = overlay.continuity
         let renderer = RasterContinuityRenderer(overlay: overlay, continuity: source)
+        // Stay within the online provider's per-district detail allowance so
+        // this exercises a real z11 -> z12 change, rather than budget coarsening.
+        let viewport = bounds.insetBy(dx: bounds.width * 0.15, dy: bounds.height * 0.15)
         let initialReady = await withCheckedContinuation { continuation in
-            source.prepare(in: bounds, zoom: 11) { continuation.resume(returning: $0) }
+            source.prepare(in: viewport, zoom: 11) { continuation.resume(returning: $0) }
         }
         XCTAssertTrue(initialReady)
+        let initialImageCount = source.snapshot().detail?.images.count ?? 0
         try await Task.sleep(for: .milliseconds(100))
         let before = try pixels(renderer)
         let initialInvalidations = renderer.invalidationFlushCount
         renderer.setCameraMovementActive(true)
         let detailReady = await withCheckedContinuation { continuation in
-            source.prepare(in: bounds, zoom: 12) { continuation.resume(returning: $0) }
+            source.prepare(in: viewport, zoom: 12) { continuation.resume(returning: $0) }
         }
         XCTAssertTrue(detailReady)
-        XCTAssertEqual(source.snapshot().detail?.images.count, 17)
+        XCTAssertEqual(Set(source.snapshot().detail?.coordinates.map(\.z) ?? []), [12])
+        XCTAssertGreaterThan(source.snapshot().detail?.images.count ?? 0, initialImageCount)
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(renderer.invalidationFlushCount, initialInvalidations)
         XCTAssertEqual(try pixels(renderer), before, "A late completion must not replace pixels during zoom")

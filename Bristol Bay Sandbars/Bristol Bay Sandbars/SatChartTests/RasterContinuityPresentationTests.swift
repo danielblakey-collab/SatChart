@@ -62,6 +62,7 @@ final class RasterContinuityPresentationTests: XCTestCase {
             onCursorTrackingStateChanged: { _ in }, onFishingSetDisplayPrompt: { _ in })
         Self.retainedCoordinators.append(coordinator)
         coordinator.mapView = map
+        coordinator.availableOnlineDistrictMaps = OnlineDistrictMapCatalog.maps.filter { $0.pack.district == .egegik && $0.version >= 4 }
         coordinator.basemapChoice = .districtsOnline
         defer {
             coordinator.prepareForDismantle()

@@ -26,7 +26,7 @@ enum DistrictID: String, CaseIterable, Identifiable {
 
     /// Highest variant currently supported by the app's naming convention.
     /// v1 is the base slug, and v2+ use suffixes like `_v2`, `_v3`, etc.
-    static let maximumSupportedPackVersion = 12
+    static let maximumSupportedPackVersion = 15
 
     /// Controls which offline map cards show up for each district.
     ///
@@ -44,8 +44,8 @@ enum DistrictID: String, CaseIterable, Identifiable {
             return [1, 2, 3, 4, 5, 6, 7]
 
         case .ugashik:
-            // ugashik_v3.mbtiles / ugashik_v3.jpg are enabled here.
-            return [1, 2, 3]
+            // Published MBTiles and previews, including v4–v6 with capture tide captions.
+            return [1, 2, 3, 4, 5, 6]
 
         case .naknek_kvichak, .nushagak:
             return [1, 2]

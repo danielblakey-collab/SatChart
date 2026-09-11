@@ -10,21 +10,21 @@ struct OnlineDistrictMapsTests {
     @Test func newVersionsAreDownloadableAndMatchPublishedOnlinePacks() {
         #expect(DistrictID.egegik.packs.compactMap(\.districtMapVersion) == Array(1...7))
         for source in OnlineDistrictMapCatalog.maps {
-            #expect(DistrictID.egegik.packs.contains(source.pack))
-            #expect(source.pack.remoteMBTilesFilenameCandidates.first == "egegik_v\(source.version).mbtiles")
-            #expect(source.pack.previewFilenameCandidates.first == "egegik_v\(source.version).jpg")
+            #expect(source.pack.district.packs.contains(source.pack))
+            #expect(source.pack.remoteMBTilesFilenameCandidates.first == "\(source.pack.slug).mbtiles")
+            #expect(source.pack.previewFilenameCandidates.first == "\(source.pack.slug).jpg")
         }
-        #expect(OnlineDistrictMapCatalog.maps.allSatisfy { $0.pack.district == .egegik })
+        #expect(Set(OnlineDistrictMapCatalog.maps.map(\.pack.district)) == [.egegik, .ugashik])
     }
 
     @Test func onlineVersionSelectionUsesActualVersionsAndWraps() {
-        #expect(OnlineDistrictMapCatalog.versions == [4, 5, 6, 7])
-        #expect(OnlineDistrictMapCatalog.normalizedVersion(1) == 4)
-        #expect(OnlineDistrictMapCatalog.normalizedVersion(99) == 4)
+        #expect(OnlineDistrictMapCatalog.versions == [3, 4, 5, 6, 7])
+        #expect(OnlineDistrictMapCatalog.normalizedVersion(1) == 3)
+        #expect(OnlineDistrictMapCatalog.normalizedVersion(99) == 3)
         #expect(OnlineDistrictMapCatalog.nextVersion(after: 4) == 5)
-        #expect(OnlineDistrictMapCatalog.nextVersion(after: 7) == 4)
+        #expect(OnlineDistrictMapCatalog.nextVersion(after: 7) == 3)
         for version in 4...7 {
-            #expect(OnlineDistrictMapCatalog.selectedMaps(version: version).map(\.pack.slug) == ["egegik_v\(version)"])
+            #expect(OnlineDistrictMapCatalog.selectedMaps(version: version).map(\.pack.slug) == ["egegik_v\(version)", "ugashik_v\(version <= 6 ? version : 4)"])
         }
     }
 
@@ -42,7 +42,7 @@ struct OnlineDistrictMapsTests {
         let path = MKTileOverlayPath(x: 16, y: 76, z: 8, contentScaleFactor: 2)
         var keys = Set<String>()
         for source in OnlineDistrictMapCatalog.maps {
-            #expect(source.tileURL(for: path).absoluteString.hasSuffix("egegik_v\(source.version)_xyz/8/16/76.png"))
+            #expect(source.tileURL(for: path).absoluteString.hasSuffix("\(source.tilePrefix)/8/16/76.png"))
             keys.insert(source.cacheKey(for: path))
             let overlay = OnlineDistrictTileOverlay(source: source)
             #expect(overlay.minimumZ == 4 && overlay.maximumZ == 15)
@@ -52,7 +52,7 @@ struct OnlineDistrictMapsTests {
             #expect(overlay.boundingMapRect.size.width == source.bounds.size.width)
             #expect(overlay.boundingMapRect.size.height == source.bounds.size.height)
         }
-        #expect(keys.count == 4)
+        #expect(keys.count == 8)
         #expect(!keys.contains("z8/x16/y76"))
     }
 
@@ -73,7 +73,7 @@ struct OnlineDistrictMapsTests {
     }
 
     @Test func coveredTilesLoadTheSelectedVersionAndForwardFailures() throws {
-        let source = try #require(OnlineDistrictMapCatalog.maps.last)
+        let source = try #require(OnlineDistrictMapCatalog.maps.first { $0.pack.slug == "egegik_v7" })
         let width = MKMapRect.world.width / 256
         let path = MKTileOverlayPath(x: Int(source.bounds.midX / width), y: Int(source.bounds.midY / width),
                                      z: 8, contentScaleFactor: 1)
@@ -105,6 +105,7 @@ struct OnlineDistrictMapsTests {
             onFollowStateChanged: { _ in }, onCursorUpdated: { _, _, _ in },
             onCursorTrackingStateChanged: { _ in }, onFishingSetDisplayPrompt: { _ in })
         defer { coordinator.prepareForDismantle() }
+        coordinator.availableOnlineDistrictMaps = OnlineDistrictMapCatalog.maps.filter { $0.pack.district == .egegik && $0.version >= 4 }
         coordinator.mapView = map
         // Offscreen version changes need no network requests.
         map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0),

@@ -159,7 +159,7 @@ struct RasterMapContinuityTests {
     }
 
     @Test func onlineContinuityUsesSelectedXYZVersionForEveryLevel() async throws {
-        let source = try #require(OnlineDistrictMapCatalog.maps.last)
+        let source = try #require(OnlineDistrictMapCatalog.maps.first { $0.pack.slug == "egegik_v7" })
         let png = try #require(UIImage(cgImage: Source().image).pngData())
         let overlay = OnlineDistrictTileOverlay(source: source) { url, key, completion in
             #expect(url.path.hasPrefix("/egegik_v7_xyz/"))

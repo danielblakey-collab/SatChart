@@ -509,14 +509,18 @@ struct SatChartTests {
         // Keep this renderer-order test independent of the device's downloaded-map
         // inventory. Offline-vs-online selection is covered by the pure policy test.
         coordinator.basemapChoice = .districtsOnline
+        coordinator.currentSelectedMapVersion = 4
 
         coordinator.syncBasemap(on: mapView)
+        defer { coordinator.prepareForDismantle() }
 
         let rasters = mapView.overlays(in: .aboveRoads)
         #expect(mapView.mapType == .satellite)
-        #expect(rasters.count == 3)
+        #expect(rasters.count == 4)
         #expect(rasters.first is BristolBaySatelliteTileOverlay)
-        #expect((rasters[1] as? OnlineDistrictTileOverlay)?.source.pack.slug == "egegik_v4")
+        #expect(Set(rasters.dropFirst().dropLast().compactMap {
+            ($0 as? OnlineDistrictTileOverlay)?.source.pack.slug
+        }) == ["egegik_v4", "ugashik_v4"])
         #expect((rasters.last as AnyObject) === downloadedDistrict)
     }
 

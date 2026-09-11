@@ -83,6 +83,7 @@ final class OnlineDistrictVersionHandoffTests: XCTestCase {
             onFollowStateChanged: { _ in }, onCursorUpdated: { _, _, _ in },
             onCursorTrackingStateChanged: { _ in }, onFishingSetDisplayPrompt: { _ in }
         )
+        coordinator.availableOnlineDistrictMaps = OnlineDistrictMapCatalog.maps.filter { $0.pack.district == .egegik && $0.version >= 4 }
         coordinator.onlineDistrictOverlayFactory = { source in
             let fixture = OnlineDistrictMap(pack: source.pack, minimumZoom: 11,
                                             maximumZoom: source.version == 5 ? 11 : 12, bounds: source.bounds)

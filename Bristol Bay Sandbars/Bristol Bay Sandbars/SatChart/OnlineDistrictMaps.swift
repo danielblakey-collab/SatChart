@@ -2,14 +2,21 @@ import Foundation
 import MapKit
 
 /// One published XYZ pyramid. The matching MBTiles uses the same pack slug.
-struct OnlineDistrictMap {
+struct OnlineDistrictMap: Equatable, @unchecked Sendable {
     let pack: OfflinePack
     let minimumZoom: Int
     let maximumZoom: Int
     let bounds: MKMapRect
+    var xyzPrefix: String? = nil
 
     var version: Int { pack.districtMapVersion! }
-    var tilePrefix: String { "\(pack.slug)_xyz" }
+    var tilePrefix: String { xyzPrefix ?? "\(pack.slug)_xyz" }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pack == rhs.pack && lhs.minimumZoom == rhs.minimumZoom
+            && lhs.maximumZoom == rhs.maximumZoom && lhs.tilePrefix == rhs.tilePrefix
+            && MKMapRectEqualToRect(lhs.bounds, rhs.bounds)
+    }
 
     func tileURL(for path: MKTileOverlayPath) -> URL {
         URL(string: "https://pub-832b588ef9ec4a588045736b6ce409b9.r2.dev")!
@@ -35,41 +42,82 @@ struct OnlineDistrictMap {
 }
 
 enum OnlineDistrictMapCatalog {
-    // Curate online maps independently: older downloadable packs have no XYZ pyramid.
-    // These bounds and zooms match the published Egegik v4–v7 packages.
-    static let maps: [OnlineDistrictMap] = {
-        let northwest = MKMapPoint(CLLocationCoordinate2D(latitude: 58.343988015946486, longitude: -157.65951633453372))
-        let southeast = MKMapPoint(CLLocationCoordinate2D(latitude: 58.147518599073585, longitude: -157.24748611450195))
-        let bounds = MKMapRect(x: northwest.x, y: northwest.y,
-                               width: southeast.x - northwest.x, height: southeast.y - northwest.y)
-        return (4...7).map { version in
-            OnlineDistrictMap(pack: OfflinePack(district: .egegik, slug: DistrictID.egegik.packSlug(forVersion: version)),
-                              minimumZoom: 4, maximumZoom: 15, bounds: bounds)
-        }
-    }()
+    static let supportedVersions = 1...15
 
-    static var versions: [Int] { Array(Set(maps.map(\.version))).sorted() }
+    /// Verified bootstrap maps for first launch; subsequent availability comes from R2.
+    static let maps: [OnlineDistrictMap] =
+        ([4, 5, 6, 7, 3].map { map(district: .egegik, version: $0) }
+         + [4, 5, 6].map { map(district: .ugashik, version: $0) })
 
-    static func normalizedVersion(_ requested: Int) -> Int {
-        versions.contains(requested) ? requested : (versions.first ?? 1)
+    static func map(district: DistrictID, version: Int, prefix: String? = nil) -> OnlineDistrictMap {
+        precondition(supportedVersions.contains(version))
+        return OnlineDistrictMap(pack: OfflinePack(district: district, slug: district.packSlug(forVersion: version)),
+                                 minimumZoom: 4, maximumZoom: 15, bounds: bounds(for: district), xyzPrefix: prefix)
     }
 
-    static func nextVersion(after requested: Int) -> Int {
-        let available = versions
-        guard let index = available.firstIndex(of: normalizedVersion(requested)) else { return 1 }
+    /// All prefixes that may be published without a new app release. v1 accepts
+    /// the established base slug and the explicit `_v1` naming convention.
+    static func candidates(district: DistrictID, version: Int) -> [OnlineDistrictMap] {
+        let standard = map(district: district, version: version)
+        return version == 1
+            ? [standard, map(district: district, version: 1, prefix: "\(district.rawValue)_v1_xyz")]
+            : [standard]
+    }
+
+    /// Fixed union geometry for every version of each district. These are the
+    /// bundled AOI extents, padded by one native z15 pixel for raster rounding.
+    static func bounds(for district: DistrictID) -> MKMapRect {
+        let box: (west: Double, south: Double, east: Double, north: Double)
+        switch district {
+        case .egegik:
+            // Preserve the geometry used by existing Egegik renderers and fixtures.
+            box = (-157.65951633453372, 58.147518599073585, -157.24748611450195, 58.343988015946486)
+        case .ugashik: box = (-157.94939102467816, 57.466121825020906, -157.4705730997837, 57.74650912748231)
+        case .naknek_kvichak: box = (-157.78671968849454, 58.56111990902738, -155.8706031831495, 59.343279875417764)
+        case .nushagak: box = (-158.94010472207094, 58.54710633939084, -158.29498590827072, 59.28340470504459)
+        case .togiak: box = (-162.21512291641795, 58.5332571126732, -159.57720728570442, 59.13850435325093)
+        }
+        let nw = MKMapPoint(CLLocationCoordinate2D(latitude: box.north, longitude: box.west))
+        let se = MKMapPoint(CLLocationCoordinate2D(latitude: box.south, longitude: box.east))
+        let rect = MKMapRect(x: nw.x, y: nw.y, width: se.x - nw.x, height: se.y - nw.y)
+        let pixel = MKMapRect.world.width / Double((1 << 15) * 256)
+        return district == .egegik ? rect : rect.insetBy(dx: -pixel, dy: -pixel)
+    }
+
+    /// At z4 these small AOIs occupy at most two tiles. Check every intersecting
+    /// tile so a sparse pyramid need not contain the AOI center tile.
+    static func discoveryURLs(for source: OnlineDistrictMap) -> [URL] {
+        MBTilesViewportTilePlanner.coordinates(in: source.bounds, zoom: 4, ring: 0, maximumCount: 4).map {
+            source.tileURL(for: MKTileOverlayPath(x: $0.x, y: $0.y, z: $0.z, contentScaleFactor: 1))
+        }
+    }
+
+    static var versions: [Int] { versions(in: maps) }
+    static func versions(in maps: [OnlineDistrictMap]) -> [Int] { Array(Set(maps.map(\.version))).sorted() }
+
+    static func normalizedVersion(_ requested: Int, in maps: [OnlineDistrictMap] = OnlineDistrictMapCatalog.maps) -> Int {
+        let available = versions(in: maps)
+        return available.contains(requested) ? requested : (available.first ?? 1)
+    }
+
+    static func nextVersion(after requested: Int, in maps: [OnlineDistrictMap] = OnlineDistrictMapCatalog.maps) -> Int {
+        let available = versions(in: maps)
+        guard let index = available.firstIndex(of: normalizedVersion(requested, in: maps)) else { return 1 }
         return available[(index + 1) % available.count]
     }
 
     /// Show one version per published district, falling back to its first available map.
-    static func selectedMaps(version: Int) -> [OnlineDistrictMap] {
+    static func selectedMaps(version: Int, in maps: [OnlineDistrictMap] = OnlineDistrictMapCatalog.maps) -> [OnlineDistrictMap] {
         DistrictID.allCases.compactMap { district in
             let available = maps.filter { $0.pack.district == district }.sorted { $0.version < $1.version }
-            return available.first { $0.version == normalizedVersion(version) } ?? available.first
+            return available.first { $0.version == version } ?? available.first
         }
     }
 }
 
 final class OnlineDistrictTileOverlay: MKTileOverlay {
+    static let imageBudget = RasterImageBudget(limit: 32 * 1024 * 1024)
+
     typealias TileLoader = (URL, String, @escaping (Data?, Error?) -> Void) -> Void
 
     private struct LoadedVersion {
@@ -106,9 +154,17 @@ final class OnlineDistrictTileOverlay: MKTileOverlay {
         let prefix = source.tilePrefix
         let baseURL = source.tileURL(for: MKTileOverlayPath(x: 0, y: 0, z: 0, contentScaleFactor: 1))
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var policy = RasterMapContinuity.Policy()
+        policy.imageBudget = Self.imageBudget
+        // Five retained districts fit below the shared cap, leaving room for a
+        // coarse replacement even when all five are visible. Admission further
+        // reduces detail while old/new versions overlap during a handoff.
+        policy.detailTiles = 24
+        policy.overviewTiles = 4
+        policy.concurrentLoads = 2
         let continuity = RasterMapContinuity(bounds: source.bounds,
                                              minimumZoom: source.minimumZoom,
-                                             maximumZoom: source.maximumZoom) { tile, completion in
+                                             maximumZoom: source.maximumZoom, policy: policy) { tile, completion in
             let url = baseURL.appendingPathComponent("\(tile.z)/\(tile.x)/\(tile.y).png")
             let key = "districts/\(prefix)/z\(tile.z)/x\(tile.x)/y\(tile.y)"
             load(url, key) { data, error in
