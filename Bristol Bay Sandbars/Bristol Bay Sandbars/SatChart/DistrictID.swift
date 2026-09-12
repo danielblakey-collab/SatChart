@@ -41,14 +41,19 @@ enum DistrictID: String, CaseIterable, Identifiable {
         switch self {
         case .egegik:
             // Published MBTiles and previews, including the new COG-derived variants.
-            return [1, 2, 3, 4, 5, 6, 7]
+            return [3, 4, 5, 6, 7]
 
         case .ugashik:
-            // Published MBTiles and previews, including v4–v6 with capture tide captions.
-            return [1, 2, 3, 4, 5, 6]
+            // Published v4–v6 imagery with capture tide captions.
+            return [4, 5, 6]
 
-        case .naknek_kvichak, .nushagak:
-            return [1, 2]
+        case .nushagak:
+            // Published v3–v6 imagery with capture tide captions.
+            return [3, 4, 5, 6]
+
+        case .naknek_kvichak:
+            // Published Naknek v3–v4 imagery with capture tide captions.
+            return [3, 4]
 
         case .togiak:
             return [1]

@@ -240,6 +240,7 @@ private enum MapViewTideStationPreference {
 /// This prevents SwiftUI from building one deeply nested generic type for all six
 /// fields, which can overflow the Swift runtime metadata decoder on physical devices.
 private struct HUDCoordinateInputField: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let placeholder: String
     @Binding var text: String
     let width: CGFloat
@@ -261,11 +262,11 @@ private struct HUDCoordinateInputField: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             .frame(width: width, height: 20)
-            .background(Color.white.opacity(0.16))
+            .background(Color.white.opacity(showsBackgrounds ? 0.16 : 0))
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(isFocused ? Color.blue : Color.white.opacity(0.12), lineWidth: 1)
+                    .stroke(showsBackgrounds ? (isFocused ? Color.blue : Color.white.opacity(0.12)) : Color.clear, lineWidth: 1)
             )
             .onSubmit {
                 onSubmit()
@@ -402,6 +403,7 @@ struct MapView: View {
     @AppStorage("sstDateUTC") private var sstDateUTC: String = SeaSurfaceTemperatureOverlay.defaultDateUTC()
     @AppStorage("showPortMollerTestFisheryStations") private var showPortMollerTestFisheryStations: Bool = true
     @AppStorage("navShowTopHUDDisplay") private var showNavTopHUDDisplay: Bool = true
+    @AppStorage("navTopHUDOpacity") private var showNavTopHUDOpacity: Bool = true
     @AppStorage("navTopHUDCollapsed") private var isTopHUDCollapsed: Bool = false
     @AppStorage("navShowTideHUD") private var showNavTideHUD: Bool = true
     @AppStorage("navShowLocationReadout") private var showNavLocationReadout: Bool = true
@@ -1237,7 +1239,7 @@ struct MapView: View {
         GeometryReader { proxy in
             let landscape = responsiveIsLandscape(proxy.size)
 
-            if showNavTopHUDDisplay || hasVisibleTopHUDActionControls {
+            Group {
                 if landscape {
                     let hudWidth = landscapeTopHUDCenteredWidth(
                         screenWidth: proxy.size.width,
@@ -1247,10 +1249,8 @@ struct MapView: View {
                     VStack(alignment: .center, spacing: 8) {
                         if hasVisibleTopHUDContent {
                             responsiveTopHUDCard(availableWidth: hudWidth, landscape: true)
-                        }
-
-                        if !hasVisibleTopHUDContent && hasVisibleTopActionRow {
-                            responsiveTopHUDShareButtons(landscape: true)
+                        } else {
+                            hiddenTopHUDControlRow(availableWidth: hudWidth)
                         }
 
                         Spacer(minLength: 0)
@@ -1269,9 +1269,11 @@ struct MapView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         if hasVisibleTopHUDContent {
                             responsiveTopHUDCard(availableWidth: availableWidth, landscape: false)
+                        } else {
+                            hiddenTopHUDControlRow(availableWidth: availableWidth)
                         }
 
-                        if hasVisibleTopActionRow {
+                        if showNavTopHUDDisplay && hasVisibleTopActionRow {
                             responsiveTopHUDShareButtons(landscape: false)
                         }
 
@@ -1384,8 +1386,7 @@ struct MapView: View {
     }
 
     private var hasVisibleTopHUDShareControls: Bool {
-        showNavTopHUDDisplay
-            && !isTopHUDCollapsed
+        (!showNavTopHUDDisplay || !isTopHUDCollapsed)
             && (showNavShareLiveButton || showNavSendLocationButton)
     }
 
@@ -1479,18 +1480,18 @@ struct MapView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .padding(.horizontal, 10)
-                        .background(scSurfaceAlt.opacity(0.92))
+                        .background(showNavTopHUDOpacity ? scSurfaceAlt.opacity(0.92) : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                .stroke(Color.white.opacity(showNavTopHUDOpacity ? 0.12 : 0), lineWidth: 1)
                         )
                 }
 
                 if let msg = toastMessage, let until = toastUntil, Date() < until {
                     Text(msg)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundColor(scTextPrimary)
+                        .foregroundColor(showNavTopHUDOpacity ? scTextPrimary : .white)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
@@ -1502,7 +1503,7 @@ struct MapView: View {
         .padding(.horizontal, isTopHUDCollapsed ? 0 : 4)
         .padding(.vertical, isTopHUDCollapsed ? 0 : 4)
         .frame(width: availableWidth, alignment: .topLeading)
-        .background(isTopHUDCollapsed ? Color.clear : scSurface.opacity(0.78))
+        .background(isTopHUDCollapsed || !showNavTopHUDOpacity ? Color.clear : scSurface.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
@@ -1954,6 +1955,35 @@ struct MapView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // These tools remain available even when the informational HUD is hidden.
+    private func hiddenTopHUDControlRow(availableWidth: CGFloat) -> some View {
+        let buttonCount = 2
+            + (showNavShareLiveButton ? 1 : 0)
+            + (showNavSendLocationButton ? 1 : 0)
+            + (showNavRecordSetButton ? 1 : 0)
+            + (showNavCreateWaypointButton ? 1 : 0)
+        let gapCount = buttonCount - 1 + (hasVisibleTopHUDActionControls ? 1 : 0)
+        let spacing = min(mapControlDefaultSpacing, max(
+            0,
+            (availableWidth - CGFloat(buttonCount) * mapControlButtonSize) / CGFloat(gapCount)
+        ))
+
+        return HStack(spacing: spacing) {
+            fishTicketOCRButton
+            mapAppearanceButton
+            if showNavShareLiveButton { liveShareToggleButton }
+            if showNavSendLocationButton { sendLocationPinButton }
+
+            if hasVisibleTopHUDActionControls {
+                Spacer(minLength: 0)
+                if showNavRecordSetButton { recordSetButton }
+                if showNavCreateWaypointButton { createWaypointButton }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("navigationTopHUDHiddenControlRow")
+    }
+
     @ViewBuilder
     private func responsiveTopHUDShareButtons(landscape: Bool) -> some View {
         if landscape {
@@ -1981,8 +2011,8 @@ struct MapView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: 10) {
-                if showNavTopHUDDisplay && showNavShareLiveButton { liveShareToggleButton }
-                if showNavTopHUDDisplay && showNavSendLocationButton { sendLocationPinButton }
+                if showNavShareLiveButton { liveShareToggleButton }
+                if showNavSendLocationButton { sendLocationPinButton }
 
                 Spacer(minLength: 8)
 
@@ -2232,11 +2262,11 @@ struct MapView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(scSurfaceAlt.opacity(0.94))
+        .background(showNavTopHUDOpacity ? scSurfaceAlt.opacity(0.94) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                .stroke(Color.white.opacity(showNavTopHUDOpacity ? 0.16 : 0), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
     }
@@ -2342,16 +2372,16 @@ struct MapView: View {
     private var offlineModeHUDBadge: some View {
         Text("Offline mode")
             .font(.system(size: 9, weight: .bold, design: .rounded))
-            .foregroundColor(Color(red: 1.0, green: 0.86, blue: 0.48))
+            .foregroundColor(showNavTopHUDOpacity ? Color(red: 1.0, green: 0.86, blue: 0.48) : .white)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(scSurface.opacity(0.86))
+            .background(showNavTopHUDOpacity ? scSurface.opacity(0.86) : Color.clear)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(Color(red: 1.0, green: 0.86, blue: 0.48).opacity(0.40), lineWidth: 0.9)
+                    .stroke(Color(red: 1.0, green: 0.86, blue: 0.48).opacity(showNavTopHUDOpacity ? 0.40 : 0), lineWidth: 0.9)
             )
             .accessibilityLabel("Offline mode")
     }
@@ -2377,10 +2407,10 @@ struct MapView: View {
     private func tideHUDBox(height: CGFloat, chartHeight: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(scSurface.opacity(0.70))
+                .fill(showNavTopHUDOpacity ? scSurface.opacity(0.70) : Color.clear)
 
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(Color.white.opacity(showNavTopHUDOpacity ? 0.12 : 0), lineWidth: 1)
 
             MiniTideHUDBox(
                 snapshot: tideHUDSnapshot,
@@ -2497,7 +2527,7 @@ struct MapView: View {
         HStack(spacing: 6) {
             Text(isCursorTrackingUser ? "Location:" : "Cursor:")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(scTextPrimary)
+                .foregroundColor(showNavTopHUDOpacity ? scTextPrimary : .white)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
 
@@ -3408,10 +3438,11 @@ struct MapView: View {
             .overlay(alignment: .topTrailing) {
                 if showFloatingOfflineModeBadge {
                     offlineModeHUDBadge
-                        .padding(.top, 12)
+                        .padding(.top, mapControlButtonSize + 12)
                         .padding(.trailing, 12)
                 }
             }
+            .environment(\.navigationReadoutBackgroundsVisible, showNavTopHUDOpacity)
             .navigationDestination(isPresented: $showTidesWeatherPage) {
                 TidesWeatherPageView()
             }
@@ -4291,6 +4322,7 @@ private extension SeaSurfaceTemperatureSource {
 }
 
 private struct SSTLegendCard: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let source: SeaSurfaceTemperatureSource
     let dateUTC: String
     var onExit: (() -> Void)? = nil
@@ -4362,13 +4394,13 @@ private struct SSTLegendCard: View {
         .padding(.horizontal, horizontalInset)
         .padding(.vertical, verticalInset)
         .frame(width: preferredWidth, height: preferredHeight, alignment: .topLeading)
-        .background(Color.black.opacity(0.70))
+        .background(Color.black.opacity(showsBackgrounds ? 0.70 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(Color.white.opacity(showsBackgrounds ? 0.12 : 0), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.24), radius: 6, y: 3)
+        .shadow(color: .black.opacity(showsBackgrounds ? 0.24 : 0), radius: 6, y: 3)
         .fixedSize(horizontal: preferredWidth == nil, vertical: preferredHeight == nil)
     }
 
@@ -4385,7 +4417,7 @@ private struct SSTLegendCard: View {
 
                 Text("\(compactSourceLabel) • \(dateUTC)")
                     .font(metadataFont)
-                    .foregroundColor(.white.opacity(0.74))
+                    .foregroundColor(.white.opacity(showsBackgrounds ? 0.74 : 1))
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
             }
@@ -4395,7 +4427,7 @@ private struct SSTLegendCard: View {
             if let legendSubtitle = source.legendSubtitle {
                 Text(legendSubtitle)
                     .font(subtitleFont)
-                    .foregroundColor(.white.opacity(0.80))
+                    .foregroundColor(.white.opacity(showsBackgrounds ? 0.80 : 1))
                     .frame(width: contentWidth, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -4433,7 +4465,7 @@ private struct SSTLegendCard: View {
 
                 Text("\(compactSourceLabel) • \(dateUTC)")
                     .font(metadataFont)
-                    .foregroundColor(.white.opacity(0.70))
+                    .foregroundColor(.white.opacity(showsBackgrounds ? 0.70 : 1))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
 
@@ -4454,7 +4486,7 @@ private struct SSTLegendCard: View {
             if let legendSubtitle = source.legendSubtitle {
                 Text(legendSubtitle)
                     .font(subtitleFont)
-                    .foregroundColor(.white.opacity(0.80))
+                    .foregroundColor(.white.opacity(showsBackgrounds ? 0.80 : 1))
                     .frame(width: contentWidth, alignment: .leading)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -4485,7 +4517,7 @@ private struct SSTLegendCard: View {
         }
         .frame(width: contentWidth)
         .font(tickFont)
-        .foregroundColor(.white.opacity(0.76))
+        .foregroundColor(.white.opacity(showsBackgrounds ? 0.76 : 1))
     }
 
     private static func tickLabel(for tick: Double, source: SeaSurfaceTemperatureSource) -> String {
@@ -6226,6 +6258,7 @@ struct SettingsDataAcknowledgmentsPageView: View {
 struct SettingsScreenLayoutOptionsPageView: View {
     @AppStorage("showPortMollerTestFisheryStations") private var showPortMollerTestFisheryStations: Bool = true
     @AppStorage("navShowTopHUDDisplay") private var showNavTopHUDDisplay: Bool = true
+    @AppStorage("navTopHUDOpacity") private var showNavTopHUDOpacity: Bool = true
     @AppStorage("navShowTideHUD") private var showNavTideHUD: Bool = true
     @AppStorage("navShowLocationReadout") private var showNavLocationReadout: Bool = true
     @AppStorage("navShowBoundaryReadout") private var showNavBoundaryReadout: Bool = true
@@ -6291,12 +6324,17 @@ struct SettingsScreenLayoutOptionsPageView: View {
     }
 
     private var hudDisplaySection: some View {
-        settingsSectionCard(title: "Top HUD / Informational Readouts") {
+        settingsSectionCard(title: "Top HUD") {
             VStack(spacing: 8) {
                 settingsToggle(
                     title: "Top HUD Display",
-                    subtitle: "Turns the top HUD, its expand/collapse control, OCR camera, and map appearance button on/off.",
+                    subtitle: "Shows the top HUD readouts. When off, fish-ticket OCR, map appearance, and enabled share and action buttons remain in one row at the top.",
                     isOn: $showNavTopHUDDisplay
+                )
+                settingsToggle(
+                    title: "Top HUD Opacity",
+                    subtitle: "Shows backgrounds behind the HUD and other navigation readouts. Turn off for white text over the map. Buttons keep their existing appearance.",
+                    isOn: $showNavTopHUDOpacity
                 )
                 settingsToggle(title: "Tides HUD", subtitle: "Shows the compact tide chart and tide event summary.", isOn: $showNavTideHUD)
                 settingsToggle(title: "Location Readout", subtitle: "Shows the editable user-location or cursor latitude/longitude row.", isOn: $showNavLocationReadout)
@@ -6318,9 +6356,9 @@ struct SettingsScreenLayoutOptionsPageView: View {
                 settingsToggle(title: "Basemap Button", subtitle: "Shows the satellite/chart basemap picker.", isOn: $showNavBasemapButton)
                 settingsToggle(title: "Main Menu Button", subtitle: "Shows the main SatChart menu button.", isOn: $showNavMainMenuButton)
                 settingsToggle(title: "Ocean Layers Button", subtitle: "Shows the SST/ocean layer control button.", isOn: $showNavOceanLayersButton)
-                settingsToggle(title: "Share Live Button", subtitle: "Shows the live location sharing button when Top HUD Display is also on.", isOn: $showNavShareLiveButton)
+                settingsToggle(title: "Share Live Button", subtitle: "Shows the live location sharing button, including when Top HUD Display is off.", isOn: $showNavShareLiveButton)
                 settingsToggle(title: "Live Share Trail", subtitle: "Shows the fading trail behind Radio Group live location pins.", isOn: $showNavLiveLocationTrail)
-                settingsToggle(title: "Send Location Button", subtitle: "Shows the one-time location pin button when Top HUD Display is also on.", isOn: $showNavSendLocationButton)
+                settingsToggle(title: "Send Location Button", subtitle: "Shows the one-time location pin button, including when Top HUD Display is off.", isOn: $showNavSendLocationButton)
                 settingsToggle(title: "Record Set Button", subtitle: "Shows the Record Set recorder.", isOn: $showNavRecordSetButton)
                 settingsToggle(title: "Create Waypoint Button", subtitle: "Shows the create waypoint button.", isOn: $showNavCreateWaypointButton)
                 settingsToggle(title: "Zoom In Button", subtitle: "Shows the map zoom-in button.", isOn: $showNavZoomInButton)
@@ -7148,6 +7186,7 @@ struct ThinScaleBar: View {
 }
 
 struct LandscapeCompactScaleBar: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let metersPerPoint: Double
 
     // 30% shorter than NauticalScaleBar's standard 140 pt bar length.
@@ -7178,11 +7217,11 @@ struct LandscapeCompactScaleBar: View {
         }
         .frame(height: containerHeight)
         .padding(.horizontal, 8)
-        .background(Color.black.opacity(0.55))
+        .background(Color.black.opacity(showsBackgrounds ? 0.55 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(Color.white.opacity(showsBackgrounds ? 0.12 : 0), lineWidth: 1)
         )
     }
 
@@ -7286,15 +7325,23 @@ struct MapPromptActionButtonStyle: ButtonStyle {
 }
 
 // Note: `hudBoxSmall()` is used by MapView HUD readouts; WaypointsView has its own styling below.
-private extension View {
-    func hudBoxSmall() -> some View {
-        self
+private struct NavigationHUDReadoutStyle: ViewModifier {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
+
+    func body(content: Content) -> some View {
+        content
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
-            .background(scSurface.opacity(0.70))
-            .foregroundColor(scTextPrimary)
+            .background(showsBackgrounds ? scSurface.opacity(0.70) : Color.clear)
+            .foregroundColor(showsBackgrounds ? scTextPrimary : .white)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private extension View {
+    func hudBoxSmall() -> some View {
+        modifier(NavigationHUDReadoutStyle())
     }
 }
 

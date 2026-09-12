@@ -516,11 +516,11 @@ struct SatChartTests {
 
         let rasters = mapView.overlays(in: .aboveRoads)
         #expect(mapView.mapType == .satellite)
-        #expect(rasters.count == 4)
+        #expect(rasters.count == 6)
         #expect(rasters.first is BristolBaySatelliteTileOverlay)
         #expect(Set(rasters.dropFirst().dropLast().compactMap {
             ($0 as? OnlineDistrictTileOverlay)?.source.pack.slug
-        }) == ["egegik_v4", "ugashik_v4"])
+        }) == ["egegik_v4", "ugashik_v4", "nushagak_v4", "naknek_kvichak_v4"])
         #expect((rasters.last as AnyObject) === downloadedDistrict)
     }
 

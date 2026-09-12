@@ -18,7 +18,6 @@ struct OfflineMapsView: View {
         return result
     }
 
-    private var shorelinePacks: [OfflinePack] { OfflinePack.shorelinePacks }
     private var basemapPacks: [OfflinePack] { OfflinePack.basemapPacks }
 
     private func mbtilesURLs(for pack: OfflinePack) -> [URL] {
@@ -70,11 +69,6 @@ struct OfflineMapsView: View {
                     ForEach(DistrictID.allCases, id: \.self) { district in
                         SectionHeader(title: district.displayName)
                         if let packs = packsByDistrict[district] { packRows(packs) }
-                    }
-
-                    if !shorelinePacks.isEmpty {
-                        SectionHeader(title: "Shorelines")
-                        packRows(shorelinePacks)
                     }
 
                     if !basemapPacks.isEmpty {
@@ -160,9 +154,63 @@ private final class PackPreviewLoader: ObservableObject {
     }
 }
 
+private extension OfflinePack {
+    /// Source-image regions matched to the supplied Naknek/Nushagak references.
+    /// Normalized coordinates keep the same geographic crop across map versions.
+    var thumbnailCrop: CGRect? {
+        guard isDistrictMapPack else { return nil }
+        switch district {
+        case .naknek_kvichak:
+            // Lower bay crop: (0, 639, 715, 627) in the 1600 × 1266 previews.
+            return CGRect(x: 0, y: 639.0 / 1266.0,
+                          width: 715.0 / 1600.0, height: 627.0 / 1266.0)
+        case .nushagak:
+            // Bay/flats crop: (0, 1032, 1600, 2008) in the 1600 × 3392 previews.
+            return CGRect(x: 0, y: 1032.0 / 3392.0,
+                          width: 1, height: 2008.0 / 3392.0)
+        default:
+            return nil
+        }
+    }
+}
+
+private struct PackPreviewImage: View {
+    let image: UIImage
+    let crop: CGRect?
+
+    var body: some View {
+        if let crop, image.size.width > 0, image.size.height > 0 {
+            GeometryReader { geometry in
+                let cropSize = CGSize(width: image.size.width * crop.width,
+                                      height: image.size.height * crop.height)
+                let scale = min(geometry.size.width / cropSize.width,
+                                geometry.size.height / cropSize.height)
+                let imageSize = CGSize(width: image.size.width * scale,
+                                       height: image.size.height * scale)
+
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: imageSize.width, height: imageSize.height)
+                    .offset(x: -crop.minX * imageSize.width,
+                            y: -crop.minY * imageSize.height)
+                    .frame(width: cropSize.width * scale, height: cropSize.height * scale,
+                           alignment: .topLeading)
+                    .clipped()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+            .background(Color.black)
+        } else {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        }
+    }
+}
+
 private struct RemotePackPreview: View {
     let urls: [URL]
     let fallbackLabel: String
+    let crop: CGRect?
 
     @StateObject private var loader = PackPreviewLoader()
 
@@ -170,9 +218,7 @@ private struct RemotePackPreview: View {
         Group {
             switch loader.phase {
             case .success(let image):
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                PackPreviewImage(image: image, crop: crop)
 
             case .idle, .loading:
                 ZStack {
@@ -239,7 +285,8 @@ private struct PackCard: View {
             GeometryReader { geo in
                 RemotePackPreview(
                     urls: previewURLs,
-                    fallbackLabel: pack.previewFilenameCandidates.first ?? slug
+                    fallbackLabel: pack.previewFilenameCandidates.first ?? slug,
+                    crop: pack.thumbnailCrop
                 )
                 .allowsHitTesting(false)
                 .frame(width: geo.size.width, height: min(geo.size.height, 280))

@@ -46,6 +46,12 @@ struct OfflinePack: Identifiable, Hashable {
             add(slug.replacingOccurrences(of: "-", with: "_"))
         }
 
+        // R2 also publishes this district under the shorter Naknek basename.
+        // Keep the canonical slug for installed files, settings, and district identity.
+        if district == .naknek_kvichak, let version = districtMapVersion {
+            add(version == 1 ? "naknek" : "naknek_v\(version)")
+        }
+
         switch slug {
         case "bristol_bay", "bristol-bay":
             add("bristol_bay")

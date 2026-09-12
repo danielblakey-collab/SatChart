@@ -12,6 +12,8 @@ Districts Online discovers versions 1–15 in the public `bristol-bay-sandbars-m
 | Nushagak | `nushagak_xyz/` or `nushagak_v1_xyz/` | `nushagak_vN_xyz/` |
 | Togiak | `togiak_xyz/` or `togiak_v1_xyz/` | `togiak_vN_xyz/` |
 
+Naknek/Kvichak also accepts the shorter `naknek_xyz/` or `naknek_v1_xyz/` for v1, and `naknek_vN_xyz/` for v2–v15. The app keeps `naknek_kvichak` as its internal district and installed-pack identity. Offline MBTiles and previews accept the matching `naknek` basenames too.
+
 Replace `N` with the version number, without leading zeros. Under each prefix, publish `z/x/y.png`: 256 × 256 PNG tiles, Web Mercator XYZ coordinates (top-origin Y), native zooms 4–15, with `Content-Type: image/png`. Preserve shoreline transparency. Display zooms 16–17 reuse zoom-15 parents and do not need additional uploads.
 
 Use the existing district AOIs. Their union bounds are bundled in `OnlineDistrictMapCatalog.bounds(for:)`; the app clips rendering and selects discovery tiles using those bounds. A pyramid with different bounds, zoom coverage, image format, or tile size needs a catalog/loader change. JPEG previews and MBTiles do not establish online availability.
@@ -24,6 +26,6 @@ Use the existing district AOIs. Their union bounds are bundled in `OnlineDistric
 
 The scan checks up to two z4 tile headers per prefix, using two workers and a 45-second scheduling deadline. Individual requests have short timeouts. Missing prefixes are skipped; unreachable prefixes retain their last known availability. A partial upload can still have missing higher-zoom tiles, so completing the upload before publishing z4 is essential. After an interrupted scan, retry on a better connection or use manual refresh.
 
-Only one v1 entry is shown if both aliases exist. The cached alias is preferred; on first discovery the base prefix (`district_xyz`) wins. Published version numbers are shared by the selector: for example, selecting v15 displays a district's v15 when present and its lowest published version otherwise. It does not show 75 choices or download all 75 maps.
+Only one entry per district/version is shown if multiple aliases exist. The cached alias is preferred; on first discovery the base prefix (`district_xyz`) wins. Published version numbers are shared by the selector: for example, selecting v15 displays a district's v15 when present and its lowest published version otherwise. It does not show 75 choices or download all 75 maps.
 
 Offline download availability remains a separate curated list in `DistrictID.offlinePackVersions`; this discovery feature does not add empty offline download cards.

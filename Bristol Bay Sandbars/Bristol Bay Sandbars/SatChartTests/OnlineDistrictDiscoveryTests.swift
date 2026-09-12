@@ -46,7 +46,7 @@ final class OnlineDistrictDiscoveryTests: XCTestCase {
             XCTAssertEqual(district.supportedLocalMapPacks.count, 15)
             for version in 1...15 {
                 let candidates = OnlineDistrictMapCatalog.candidates(district: district, version: version)
-                XCTAssertEqual(candidates.count, version == 1 ? 2 : 1)
+                XCTAssertEqual(candidates.count, (version == 1 ? 2 : 1) * (district == .naknek_kvichak ? 2 : 1))
                 for source in candidates {
                     XCTAssertEqual(source.version, version)
                     let urls = OnlineDistrictMapCatalog.discoveryURLs(for: source)
@@ -71,7 +71,7 @@ final class OnlineDistrictDiscoveryTests: XCTestCase {
         try await finish(store)
         XCTAssertEqual(Set(store.maps.map(\.tilePrefix)), probe.available)
         XCTAssertEqual(probe.peak, 2)
-        XCTAssertLessThanOrEqual(probe.requests.count, 160)
+        XCTAssertLessThanOrEqual(probe.requests.count, 192)
         XCTAssertTrue(probe.requests.allSatisfy { $0.host == "pub-832b588ef9ec4a588045736b6ce409b9.r2.dev" })
         XCTAssertEqual(OnlineDistrictMapCatalog.versions(in: store.maps), [1, 8, 12, 15])
         XCTAssertEqual(OnlineDistrictMapCatalog.nextVersion(after: 15, in: store.maps), 1)
@@ -80,6 +80,26 @@ final class OnlineDistrictDiscoveryTests: XCTestCase {
         store.refreshIfNeeded()
         XCTAssertEqual(probe.requests.count, count)
         XCTAssertFalse(store.isRefreshing)
+    }
+
+    func testNaknekShortPrefixesDiscoverAllVersionsAndRestoreWithoutDuplicates() async throws {
+        let preferences = defaults(); let probe = Probe()
+        let aliases = Set((1...15).map { "naknek_v\($0)_xyz" })
+        probe.set(aliases.union(["naknek_kvichak_v4_xyz"]))
+        let store = OnlineDistrictMapAvailability(defaults: preferences, initialMaps: [], probe: probe.load)
+        store.refreshIfNeeded(); try await finish(store)
+        XCTAssertEqual(store.maps.count, 15)
+        XCTAssertEqual(Set(store.maps.map(\.pack.slug)), Set((1...15).map {
+            DistrictID.naknek_kvichak.packSlug(forVersion: $0)
+        }))
+        XCTAssertEqual(store.maps.first { $0.version == 3 }?.tilePrefix, "naknek_v3_xyz")
+        XCTAssertEqual(store.maps.first { $0.version == 4 }?.tilePrefix, "naknek_kvichak_v4_xyz")
+        let restored = OnlineDistrictMapAvailability(defaults: preferences, initialMaps: [], probe: probe.load)
+        XCTAssertEqual(restored.maps, store.maps)
+        probe.set(aliases.union(["naknek_kvichak_v3_xyz", "naknek_kvichak_v4_xyz"]))
+        restored.refreshIfNeeded(force: true); try await finish(restored)
+        XCTAssertEqual(restored.maps, store.maps, "An already selected prefix remains preferred when both exist")
+        XCTAssertEqual(probe.peak, 2)
     }
 
     func testSparseProbeCanFindSecondTileAndNoDataBodyIsRequired() async throws {

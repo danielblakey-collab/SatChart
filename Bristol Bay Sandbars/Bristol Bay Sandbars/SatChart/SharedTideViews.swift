@@ -2,6 +2,19 @@ import Foundation
 import SwiftUI
 import Charts
 
+// Applies only to informational map readouts. Interactive button styles keep
+// their normal backgrounds, borders, and status colors.
+private struct NavigationReadoutBackgroundsVisibleKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var navigationReadoutBackgroundsVisible: Bool {
+        get { self[NavigationReadoutBackgroundsVisibleKey.self] }
+        set { self[NavigationReadoutBackgroundsVisibleKey.self] = newValue }
+    }
+}
+
 enum TidePresentation {
     private static let compactTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -103,6 +116,7 @@ struct TideChartMarker: Identifiable {
 }
 
 struct TideCurveChartView: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let points: [TideCurvePoint]
     let referenceDate: Date
     var height: CGFloat = 150
@@ -157,7 +171,7 @@ struct TideCurveChartView: View {
                                 .foregroundColor(marker.color)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 2)
-                                .background(Color.black.opacity(0.35))
+                                .background(Color.black.opacity(showsBackgrounds ? 0.35 : 0))
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                 }
@@ -226,7 +240,7 @@ struct TideCurveChartView: View {
                                 .foregroundColor(currentHeightLabelColor)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background(Color.black.opacity(0.35))
+                                .background(Color.black.opacity(showsBackgrounds ? 0.35 : 0))
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .position(x: clampedX, y: plotRect.minY + 10)
                         }
@@ -265,6 +279,7 @@ struct TideCurveChartView: View {
 }
 
 struct MiniTideHUDBox: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let snapshot: TidesWeatherSnapshot?
     let isLoading: Bool
     let errorMessage: String?
@@ -354,22 +369,22 @@ struct MiniTideHUDBox: View {
                 if let trailingStatusText {
                     Text(trailingStatusText)
                         .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(red: 1.0, green: 0.86, blue: 0.48))
+                        .foregroundColor(showsBackgrounds ? Color(red: 1.0, green: 0.86, blue: 0.48) : .white)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
-                        .background(Color.black.opacity(0.24))
+                        .background(Color.black.opacity(showsBackgrounds ? 0.24 : 0))
                         .clipShape(Capsule())
                         .overlay(
                             Capsule()
-                                .stroke(Color(red: 1.0, green: 0.86, blue: 0.48).opacity(0.38), lineWidth: 0.8)
+                                .stroke(Color(red: 1.0, green: 0.86, blue: 0.48).opacity(showsBackgrounds ? 0.38 : 0), lineWidth: 0.8)
                         )
                         .accessibilityLabel(trailingStatusText)
                 } else {
                     Text(stationDistanceLine)
                         .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.84))
+                        .foregroundColor(.white.opacity(showsBackgrounds ? 0.84 : 1))
                         .lineLimit(1)
                         .minimumScaleFactor(0.70)
                 }
@@ -410,12 +425,12 @@ struct MiniTideHUDBox: View {
                 height: chartHeight,
                 showYAxis: false,
                 showXAxis: false,
-                labelColor: .white.opacity(0.72),
+                labelColor: .white.opacity(showsBackgrounds ? 0.72 : 1),
                 gridColor: .white.opacity(0.14),
                 tickColor: .white.opacity(0.22),
                 axisLabelFont: .system(size: 8, weight: .semibold, design: .rounded),
                 emptyMessage: errorMessage == nil ? "Tide chart unavailable" : "Tides unavailable",
-                emptyMessageColor: .white.opacity(0.72),
+                emptyMessageColor: .white.opacity(showsBackgrounds ? 0.72 : 1),
                 currentHeightLabel: currentHeightText,
                 currentHeightLabelFont: .system(size: 11, weight: .semibold, design: .rounded),
                 currentHeightLabelColor: .white
@@ -429,13 +444,13 @@ struct MiniTideHUDBox: View {
 
                 Text("Loading tide chart…")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.80))
+                    .foregroundColor(.white.opacity(showsBackgrounds ? 0.80 : 1))
             }
             .frame(maxWidth: .infinity, minHeight: chartHeight, maxHeight: chartHeight, alignment: .center)
         } else {
             Text(errorMessage == nil ? "Tide chart unavailable" : "Tides unavailable")
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.72))
+                .foregroundColor(.white.opacity(showsBackgrounds ? 0.72 : 1))
                 .frame(maxWidth: .infinity, minHeight: chartHeight, maxHeight: chartHeight, alignment: .center)
         }
     }

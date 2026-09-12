@@ -1,14 +1,14 @@
 # District online map testing
 
-Working copy: `/Users/danielblakey/Desktop/SatChart-Dev`
+Working copy: `/Users/danielblakey/Desktop/Scripts/SatChart-Dev`
 
 Branch: `codex/refine-landscape-top-hud`
 
 ## Behavior
 
 - The previous Bristol Bay online option is now **Districts Online**. Existing saved selections migrate automatically because the stored raw value remains `bristolBaySatelliteOnline`.
-- **Map v#** cycles the union of discovered online version numbers, independently of downloads. Egegik v3–v7 and Ugashik v4–v6 are currently published. Each district uses the selected number if available, otherwise its lowest published version. The online selection is saved separately from the offline selection.
-- **Download Offline Maps → Egegik** includes v4, v5, v6, and v7 alongside the existing versions. Download, validation, installation, cancellation, and deletion use the existing MBTiles manager.
+- **Map v#** cycles the union of discovered online version numbers, independently of downloads. Egegik v3–v7, Ugashik v4–v6, Nushagak v3–v6, and Naknek v3–v4 are currently published. Each district uses the selected number if available, otherwise its lowest published version. The online selection is saved separately from the offline selection.
+- **Download Offline Maps → Egegik** includes v3–v7. Download, validation, installation, cancellation, and deletion use the existing MBTiles manager.
 - Online district imagery sits above the existing baywide satellite background. All five districts support XYZ versions 1–15. Districts without a published pyramid retain the background imagery.
 - Online maps share this branch’s existing bounded tile cache and request queue. Each online prefix has its own cache namespace. Changing map mode removes district online overlays; repeated updates retain the current overlay. At most one selected overlay per district is attached, regardless of how many versions are published.
 - The app reads the derived MBTiles and XYZ PNG outputs. It does not read the COG master TIFF directly.
@@ -17,7 +17,7 @@ Branch: `codex/refine-landscape-top-hud`
 
 1. Open `Bristol Bay Sandbars/Bristol Bay Sandbars/SatChart.xcodeproj` in the SatChart-Dev working copy and run the `SatChart` scheme.
 2. Choose **Districts Online** and pan to Egegik, approximately **58.246° N, 157.454° W**. No district downloads are needed.
-3. Tap **Map v#** through the discovered versions (currently v3–v7), then pan to Ugashik to compare its v4–v6 imagery. Long-press the button and choose **Refresh online map versions** after uploading a new pyramid. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses zoom-15 parents for display zooms 16–17, matching Districts Offline. Both the plus button and pinch gestures stop at display zoom 17.
+3. Tap **Map v#** through the discovered versions (currently v3–v7), then pan to Ugashik, Nushagak, and Naknek to compare their published imagery. Long-press the button and choose **Refresh online map versions** after uploading a new pyramid. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses zoom-15 parents for display zooms 16–17, matching Districts Offline. Both the plus button and pinch gestures stop at display zoom 17.
 4. Open **Menu → Download Offline Maps** and download the desired Egegik variants. Confirm the preview, completed status, and download size.
 5. Choose **Districts Offline** and cycle through the downloaded maps. Its existing selector cycles downloaded entries; when only v4–v7 are downloaded, its cycle positions 1–4 correspond to those four packages.
 6. Test the downloaded district area in airplane mode. Return online, switch back to **Districts Online**, and confirm its previous online selection is restored. Switch to Satellite or NOAA and check that no district online imagery remains.
@@ -80,3 +80,21 @@ The final iPad simulator build passed. All 164 selected checks passed across the
 The five-district stress case retained 19 MiB of decoded frame reservations under the shared 32 MiB cap. The live MapKit version-switch check sampled 96 real Egegik v4/v5 frames without detected imagery gaps; the child-zoom check sampled another 96 frames with full opaque-area coverage and source requests capped at z15. These are simulator checks, not total-RAM measurements on an older physical device.
 
 A separate live run of the production URLSession discovery code, starting from an empty isolated cache, found exactly eight R2 pyramids in about 14 seconds: Egegik v3–v7 and Ugashik v4–v6. The scan used public HEAD requests only. Future v1/v15 discovery, alias handling, missing versions, interrupted scans, persistent availability, and all five district keys were exercised with controlled responses. `git diff --check` passed.
+
+## Nushagak v3–v6 — September 11, 2026
+
+The default online catalog now includes the four published Nushagak XYZ pyramids. They use the existing global map-version selection and stable handoffs. The Nushagak bounds include the expanded `nushagak_new` footprint; its southeast flats are covered by a regression check. The offline cards use NOAA Clarks Point predictions for their capture captions; see [capture times, heights, and sources](nushagak-capture-tides.md).
+
+## Naknek v3–v4 — September 12, 2026
+
+The offline cards and initial online catalog include the published Naknek v3 and v4 maps. Short `naknek_vN` upload names are supported alongside the app's canonical `naknek_kvichak_vN` identity for downloads, previews, package validation, and XYZ discovery. Both XYZ prefixes work with the existing version selector and stable handoffs. See [capture times, heights, and verification](naknek-capture-tides.md).
+
+## Retired download cards and reference thumbnail crops — September 12, 2026
+
+The Offline Maps page now lists Nushagak v3–v6, Naknek–Kvichak v3–v4, Egegik v3–v7, Ugashik v4–v6, and the existing Togiak map. The retired district cards and the entire Shorelines download section are removed. Basemap cards remain available. Existing local map recognition and the online v1–v15 discovery contract are unchanged.
+
+Naknek and Nushagak thumbnails now use source-image crop regions matched to the user's reference images. Naknek shows the lower bay with the upstream rivers cropped away: `(0, 639, 715, 627)` in the 1600 × 1266 previews. Nushagak shows the bay and tidal flats: `(0, 1032, 1600, 2008)` in the 1600 × 3392 previews. These replace the earlier approximate Nushagak scale and vertical offset.
+
+The rectangles are normalized and shared across each district's versions. The cropped area fits inside the existing 280-point preview frame with a black background, preserving the requested geographic framing at phone and tablet widths. Other districts retain their existing framing. The implementation uses SwiftUI layout and clipping with the already-loaded image; it creates no additional cropped bitmap or cached image. Source JPGs, map tiles, and tide captions are unchanged.
+
+Verification: the catalog cleanup passed all 45 selected catalog/app regression tests. After applying the reference crops, the app built successfully for the iPad simulator. All six remaining Naknek/Nushagak versions were rendered with the production thumbnail component at 330- and 750-point card widths; visual comparisons confirmed the requested boundaries across versions and both widths. The temporary preview app was removed and the QA simulator restored to its previous shutdown state. `git diff --check` passed.

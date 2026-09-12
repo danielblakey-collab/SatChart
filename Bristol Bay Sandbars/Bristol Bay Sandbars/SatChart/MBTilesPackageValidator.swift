@@ -525,15 +525,30 @@ nonisolated enum MBTilesPackageValidator {
         return native
     }
 
-    private static func identitiesAreCompatible(expected: String, actual: String) -> Bool {
-        func normalized(_ value: String) -> String {
-            value.lowercased()
-                .replacingOccurrences(of: "-", with: "_")
-                .replacingOccurrences(of: " ", with: "_")
-                .replacingOccurrences(of: "ncds", with: "noaa")
+    /// Normalize transport aliases while retaining the canonical installed package ID.
+    static func normalizedPackageIdentity(_ value: String) -> String {
+        let normalized = value.lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "ncds", with: "noaa")
+        if normalized == "naknek" { return "naknek_kvichak" }
+        let prefix = "naknek_v"
+        if normalized.hasPrefix(prefix) {
+            let suffix = String(normalized.dropFirst(prefix.count))
+            if let version = Int(suffix), (1...15).contains(version), suffix == String(version) {
+                return "naknek_kvichak_v\(version)"
+            }
         }
-        let lhs = normalized(expected)
-        let rhs = normalized(actual)
+        return normalized
+    }
+
+    private static func identitiesAreCompatible(expected: String, actual: String) -> Bool {
+        let lhs = normalizedPackageIdentity(expected)
+        let rhs = normalizedPackageIdentity(actual)
+        // Versioned Naknek aliases must match exactly (e.g. v1 is not v15).
+        if lhs.hasPrefix("naknek_kvichak_v"), rhs.hasPrefix("naknek_kvichak_v") {
+            return lhs == rhs
+        }
         return lhs == rhs || lhs.hasPrefix(rhs) || rhs.hasPrefix(lhs)
     }
 }

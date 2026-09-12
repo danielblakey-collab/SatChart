@@ -3,6 +3,7 @@ import MapKit
 
 /// Compact scale bar that fits in a HUD-height pill (similar to your top text boxes).
 struct NauticalScaleBar: View {
+    @Environment(\.navigationReadoutBackgroundsVisible) private var showsBackgrounds
     let metersPerPoint: Double
 
     // Target max width of the bar (not the container)
@@ -36,11 +37,11 @@ struct NauticalScaleBar: View {
         }
         .frame(height: containerHeight)
         .padding(.horizontal, 10)
-        .background(Color.black.opacity(0.55))
+        .background(Color.black.opacity(showsBackgrounds ? 0.55 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(Color.white.opacity(showsBackgrounds ? 0.12 : 0), lineWidth: 1)
         )
     }
 

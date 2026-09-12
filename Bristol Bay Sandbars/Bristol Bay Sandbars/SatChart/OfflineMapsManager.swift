@@ -1089,13 +1089,8 @@ final class OfflineMapsManager: NSObject, ObservableObject {
     }
 
     nonisolated private static func compatibleRemoteIdentity(_ expected: String, _ actual: String) -> Bool {
-        func normalize(_ value: String) -> String {
-            value.lowercased()
-                .replacingOccurrences(of: "-", with: "_")
-                .replacingOccurrences(of: " ", with: "_")
-                .replacingOccurrences(of: "ncds", with: "noaa")
-        }
-        return normalize(expected) == normalize(actual)
+        MBTilesPackageValidator.normalizedPackageIdentity(expected)
+            == MBTilesPackageValidator.normalizedPackageIdentity(actual)
     }
 
     private func trustedSHA256(from response: HTTPURLResponse) -> String? {

@@ -2169,6 +2169,27 @@ struct MBTilesHardeningTests {
         }
     }
 
+    @Test func validatorAcceptsNaknekAliasesButRejectsDifferentVersionsAndDistricts() async throws {
+        for version in [3, 4, 15] {
+            let fixture = try Self.makeFixture(scheme: .tms, includeIndex: true,
+                                               packageName: "naknek_v\(version)")
+            defer { try? FileManager.default.removeItem(at: fixture.deletingLastPathComponent()) }
+            let receipt = try await Task.detached {
+                try MBTilesPackageValidator.validate(at: fixture, expectation: .init(
+                    packageIdentifier: "naknek_kvichak_v\(version)", version: "test"))
+            }.value
+            #expect(receipt.packageIdentifier == "naknek_kvichak_v\(version)")
+            for wrongIdentifier in ["naknek_kvichak_v1", "naknek_kvichak_v\(version == 3 ? 4 : 3)", "nushagak_v\(version)"] {
+                await #expect(throws: MBTilesValidationError.self) {
+                    try await Task.detached {
+                        try MBTilesPackageValidator.validate(at: fixture, expectation: .init(
+                            packageIdentifier: wrongIdentifier, version: "test"))
+                    }.value
+                }
+            }
+        }
+    }
+
     @Test func normalizedTilesImagesSchemaValidatesAndLoadsThroughTheRuntimeReader() async throws {
         let fixture = try Self.makeFixture(
             scheme: .tms,

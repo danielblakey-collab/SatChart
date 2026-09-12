@@ -8,13 +8,15 @@ struct OnlineDistrictMapsTests {
     // Match the renderer tests on this branch: keep MapKit views alive through test teardown.
     private static var retainedMapViews: [MKMapView] = []
     @Test func newVersionsAreDownloadableAndMatchPublishedOnlinePacks() {
-        #expect(DistrictID.egegik.packs.compactMap(\.districtMapVersion) == Array(1...7))
+        #expect(DistrictID.egegik.packs.compactMap(\.districtMapVersion) == Array(3...7))
+        #expect(DistrictID.ugashik.packs.compactMap(\.districtMapVersion) == Array(4...6))
+        #expect(DistrictID.togiak.packs.compactMap(\.districtMapVersion) == [1])
         for source in OnlineDistrictMapCatalog.maps {
             #expect(source.pack.district.packs.contains(source.pack))
             #expect(source.pack.remoteMBTilesFilenameCandidates.first == "\(source.pack.slug).mbtiles")
             #expect(source.pack.previewFilenameCandidates.first == "\(source.pack.slug).jpg")
         }
-        #expect(Set(OnlineDistrictMapCatalog.maps.map(\.pack.district)) == [.egegik, .ugashik])
+        #expect(Set(OnlineDistrictMapCatalog.maps.map(\.pack.district)) == [.egegik, .ugashik, .nushagak, .naknek_kvichak])
     }
 
     @Test func onlineVersionSelectionUsesActualVersionsAndWraps() {
@@ -24,8 +26,36 @@ struct OnlineDistrictMapsTests {
         #expect(OnlineDistrictMapCatalog.nextVersion(after: 4) == 5)
         #expect(OnlineDistrictMapCatalog.nextVersion(after: 7) == 3)
         for version in 4...7 {
-            #expect(OnlineDistrictMapCatalog.selectedMaps(version: version).map(\.pack.slug) == ["egegik_v\(version)", "ugashik_v\(version <= 6 ? version : 4)"])
+            #expect(OnlineDistrictMapCatalog.selectedMaps(version: version).map(\.pack.slug) == ["nushagak_v\(version <= 6 ? version : 3)", "naknek_kvichak_v\(version == 4 ? 4 : 3)", "egegik_v\(version)", "ugashik_v\(version <= 6 ? version : 4)"])
         }
+    }
+
+    @Test func nushagakOnlineCoversTheExpandedPublishedFootprint() {
+        let southeastFlats = MKMapPoint(CLLocationCoordinate2D(latitude: 58.49, longitude: -158.22))
+        for version in 3...6 {
+            let source = OnlineDistrictMapCatalog.selectedMaps(version: version)
+                .first { $0.pack.district == .nushagak }
+            #expect(source?.version == version)
+            #expect(source?.tilePrefix == "nushagak_v\(version)_xyz")
+            #expect(source?.bounds.contains(southeastFlats) == true)
+        }
+        #expect(DistrictID.nushagak.packs.compactMap(\.districtMapVersion) == Array(3...6))
+    }
+
+    @Test func naknekUploadsResolveWithoutChangingInstalledPackIdentity() throws {
+        #expect(DistrictID.naknek_kvichak.packs.compactMap(\.districtMapVersion) == Array(3...4))
+        for version in 3...4 {
+            let source = try #require(OnlineDistrictMapCatalog.selectedMaps(version: version)
+                .first { $0.pack.district == .naknek_kvichak })
+            #expect(source.pack.slug == "naknek_kvichak_v\(version)")
+            #expect(source.tilePrefix == "naknek_v\(version)_xyz")
+            #expect(source.pack.remoteMBTilesFilenameCandidates.contains("naknek_v\(version).mbtiles"))
+            #expect(source.pack.previewFilenameCandidates.contains("naknek_v\(version).jpg"))
+            #expect(source.pack.remoteMBTilesFilenameCandidates.first == "naknek_kvichak_v\(version).mbtiles")
+        }
+        let shoreline = OfflinePack(district: .naknek_kvichak, slug: "naknek_to_egegik_shoreline")
+        #expect(!shoreline.remoteBasenameCandidates.contains("naknek"))
+        #expect(!DistrictID.egegik.defaultPack.remoteBasenameCandidates.contains("naknek"))
     }
 
     @Test func savedOnlineBasemapPreferenceKeepsWorking() {
@@ -52,7 +82,7 @@ struct OnlineDistrictMapsTests {
             #expect(overlay.boundingMapRect.size.width == source.bounds.size.width)
             #expect(overlay.boundingMapRect.size.height == source.bounds.size.height)
         }
-        #expect(keys.count == 8)
+        #expect(keys.count == 14)
         #expect(!keys.contains("z8/x16/y76"))
     }
 

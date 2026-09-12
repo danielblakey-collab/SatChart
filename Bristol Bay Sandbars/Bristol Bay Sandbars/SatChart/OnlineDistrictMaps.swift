@@ -47,7 +47,9 @@ enum OnlineDistrictMapCatalog {
     /// Verified bootstrap maps for first launch; subsequent availability comes from R2.
     static let maps: [OnlineDistrictMap] =
         ([4, 5, 6, 7, 3].map { map(district: .egegik, version: $0) }
-         + [4, 5, 6].map { map(district: .ugashik, version: $0) })
+         + [4, 5, 6].map { map(district: .ugashik, version: $0) }
+         + [3, 4, 5, 6].map { map(district: .nushagak, version: $0) }
+         + [3, 4].map { map(district: .naknek_kvichak, version: $0, prefix: "naknek_v\($0)_xyz") })
 
     static func map(district: DistrictID, version: Int, prefix: String? = nil) -> OnlineDistrictMap {
         precondition(supportedVersions.contains(version))
@@ -59,9 +61,19 @@ enum OnlineDistrictMapCatalog {
     /// the established base slug and the explicit `_v1` naming convention.
     static func candidates(district: DistrictID, version: Int) -> [OnlineDistrictMap] {
         let standard = map(district: district, version: version)
-        return version == 1
-            ? [standard, map(district: district, version: 1, prefix: "\(district.rawValue)_v1_xyz")]
-            : [standard]
+        var sources = [standard]
+        if version == 1 {
+            sources.append(map(district: district, version: 1, prefix: "\(district.rawValue)_v1_xyz"))
+        }
+        if district == .naknek_kvichak {
+            // Accept the published short name for every supported version.
+            let alias = version == 1 ? "naknek" : "naknek_v\(version)"
+            sources.append(map(district: district, version: version, prefix: "\(alias)_xyz"))
+            if version == 1 {
+                sources.append(map(district: district, version: 1, prefix: "naknek_v1_xyz"))
+            }
+        }
+        return sources
     }
 
     /// Fixed union geometry for every version of each district. These are the
@@ -74,7 +86,9 @@ enum OnlineDistrictMapCatalog {
             box = (-157.65951633453372, 58.147518599073585, -157.24748611450195, 58.343988015946486)
         case .ugashik: box = (-157.94939102467816, 57.466121825020906, -157.4705730997837, 57.74650912748231)
         case .naknek_kvichak: box = (-157.78671968849454, 58.56111990902738, -155.8706031831495, 59.343279875417764)
-        case .nushagak: box = (-158.94010472207094, 58.54710633939084, -158.29498590827072, 59.28340470504459)
+        case .nushagak:
+            // v3–v6 use the expanded nushagak_new AOI, including its southern/eastern flats.
+            box = (-158.940110206604, 58.466681049701975, -158.19475650787356, 59.283421786680577)
         case .togiak: box = (-162.21512291641795, 58.5332571126732, -159.57720728570442, 59.13850435325093)
         }
         let nw = MKMapPoint(CLLocationCoordinate2D(latitude: box.north, longitude: box.west))
