@@ -20,7 +20,7 @@ final class SatChartAppDelegate: NSObject, UIApplicationDelegate {
 struct SatChartApp: App {
     @UIApplicationDelegateAdaptor(SatChartAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("keepDisplayOnWhileAppInUse") private var keepDisplayOnWhileAppInUse: Bool = false
+    @AppStorage("keepDisplayOnWhileAppInUse") private var keepDisplayOnWhileAppInUse: Bool = true
 
     init() {
         FirebaseApp.configure()

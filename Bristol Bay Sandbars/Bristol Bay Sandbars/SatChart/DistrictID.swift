@@ -28,15 +28,9 @@ enum DistrictID: String, CaseIterable, Identifiable {
     /// v1 is the base slug, and v2+ use suffixes like `_v2`, `_v3`, etc.
     static let maximumSupportedPackVersion = 15
 
-    /// Controls which offline map cards show up for each district.
-    ///
-    /// Add a version number here after adding the matching files to R2:
-    /// - MBTiles: `<district>_v3.mbtiles`, `<district>_v4.mbtiles`, etc.
-    /// - Preview: `<district>_v3.jpg`, `<district>_v4.jpg`, etc.
-    ///
-    /// Examples:
-    /// - `[1, 2, 3]` shows base, v2, and v3.
-    /// - `[1, 2, 3, 4, 5, 6]` shows all supported variants.
+    /// Legacy package inventory, also used while looking for local map resources.
+    /// The download screen uses OfflineDistrictPackAvailability to verify actual
+    /// R2 packages and previews; entries here do not create download cards.
     private var offlinePackVersions: [Int] {
         switch self {
         case .egegik:
@@ -56,7 +50,9 @@ enum DistrictID: String, CaseIterable, Identifiable {
             return [3, 4]
 
         case .togiak:
-            return [1]
+            // Recognize every supported Togiak name in local inventory.
+            // Only R2-verified pairs become download cards.
+            return Array(1...Self.maximumSupportedPackVersion)
         }
     }
 

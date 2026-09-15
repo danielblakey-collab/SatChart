@@ -2190,6 +2190,63 @@ struct MBTilesHardeningTests {
         }
     }
 
+    @Test func validatorAcceptsOnlyTheKnownBristolBayLegacyExportName() async throws {
+        let legacy = try Self.makeFixture(scheme: .tms, includeIndex: true,
+                                          packageName: "bbay_entire_bay_z4_13")
+        defer { try? FileManager.default.removeItem(at: legacy.deletingLastPathComponent()) }
+        let receipt = try await Task.detached {
+            try MBTilesPackageValidator.validate(at: legacy, expectation: .init(
+                packageIdentifier: "bristol_bay", version: "legacy"))
+        }.value
+        #expect(receipt.packageIdentifier == "bristol_bay")
+        #expect(receipt.tileCount == 1)
+
+        for wrongIdentifier in ["togiak", "noaa_bristol_bay", "bristol_bay_v2"] {
+            await #expect(throws: MBTilesValidationError.self) {
+                try await Task.detached {
+                    try MBTilesPackageValidator.validate(at: legacy, expectation: .init(
+                        packageIdentifier: wrongIdentifier, version: "legacy"))
+                }.value
+            }
+        }
+        for unknownName in ["bbay_entire_bay_z4_14", "bbay_entire_bay_z4_13_unverified"] {
+            let unknown = try Self.makeFixture(scheme: .tms, includeIndex: true,
+                                               packageName: unknownName)
+            defer { try? FileManager.default.removeItem(at: unknown.deletingLastPathComponent()) }
+            await #expect(throws: MBTilesValidationError.self) {
+                try await Task.detached {
+                    try MBTilesPackageValidator.validate(at: unknown, expectation: .init(
+                        packageIdentifier: "bristol_bay", version: "unknown"))
+                }.value
+            }
+        }
+    }
+
+    @Test func bristolBayLegacyIdentityStillRequiresValidRasterAndChecksum() async throws {
+        let corrupt = try Self.makeFixture(scheme: .tms, includeIndex: true,
+                                           corruptRootTile: true,
+                                           packageName: "bbay_entire_bay_z4_13")
+        let valid = try Self.makeFixture(scheme: .tms, includeIndex: true,
+                                         packageName: "bbay_entire_bay_z4_13")
+        defer {
+            try? FileManager.default.removeItem(at: corrupt.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: valid.deletingLastPathComponent())
+        }
+        await #expect(throws: MBTilesValidationError.self) {
+            try await Task.detached {
+                try MBTilesPackageValidator.validate(at: corrupt, expectation: .init(
+                    packageIdentifier: "bristol_bay", version: "corrupt"))
+            }.value
+        }
+        await #expect(throws: MBTilesValidationError.self) {
+            try await Task.detached {
+                try MBTilesPackageValidator.validate(at: valid, expectation: .init(
+                    packageIdentifier: "bristol_bay", version: "checksum",
+                    expectedSHA256: String(repeating: "0", count: 64)))
+            }.value
+        }
+    }
+
     @Test func normalizedTilesImagesSchemaValidatesAndLoadsThroughTheRuntimeReader() async throws {
         let fixture = try Self.makeFixture(
             scheme: .tms,

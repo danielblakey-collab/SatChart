@@ -1,10 +1,10 @@
 import Foundation
 
 /// Curated capture metadata, available even when the device is offline.
-/// Egegik heights use half-cosine interpolation between NOAA high/low predictions;
+/// Egegik and the Togiak regional reference use half-cosine interpolation between NOAA high/low predictions;
 /// Ugashik, Nushagak, and Naknek heights use NOAA's harmonic prediction at the exact capture minute.
 /// Event labels separately describe the nearest high or low tide.
-/// Sources and derivation: docs/{egegik,ugashik,nushagak,naknek}-capture-tides.md.
+/// Sources and derivation: docs/{egegik,ugashik,nushagak,naknek,togiak}-capture-tides.md.
 struct OfflineMapCaptureTide {
     let dateLabel: String
     let timeLabel: String
@@ -19,6 +19,7 @@ struct OfflineMapCaptureTide {
         case dagoCreekMouth
         case clarksPoint
         case naknek
+        case blackRock
 
         var id: String {
             switch self {
@@ -26,6 +27,7 @@ struct OfflineMapCaptureTide {
             case .dagoCreekMouth: return "9464512"
             case .clarksPoint: return "9465261"
             case .naknek: return "9465203"
+            case .blackRock: return "9465182"
             }
         }
 
@@ -35,7 +37,12 @@ struct OfflineMapCaptureTide {
             case .dagoCreekMouth: return "Dago Creek Mouth, Ugashik Bay"
             case .clarksPoint: return "Clarks Point, Nushagak Bay"
             case .naknek: return "Naknek, Naknek River"
+            case .blackRock: return "Black Rock, Walrus Islands"
             }
+        }
+
+        var referenceNote: String? {
+            self == .blackRock ? "Regional reference · Togiak’s local tide may differ." : nil
         }
 
         var label: String { "NOAA · \(name)" }
@@ -48,6 +55,14 @@ struct OfflineMapCaptureTide {
 extension OfflinePack {
     var captureTide: OfflineMapCaptureTide? {
         switch (district, slug) {
+        case (.togiak, "togiak"):
+            return OfflineMapCaptureTide(
+                dateLabel: "9/27/25", timeLabel: "2:05 PM AKDT",
+                estimatedHeightFeet: 0.9,
+                stateLabel: "Falling",
+                relativeEventLabel: "2 min before low tide",
+                eventLabel: "Low: 2:07 PM AKDT · 0.9 ft MLLW",
+                station: .blackRock)
         case (.egegik, "egegik_v3"):
             return OfflineMapCaptureTide(
                 dateLabel: "9/14/25", timeLabel: "1:55 PM AKDT",

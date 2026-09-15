@@ -39,7 +39,7 @@ final class RasterContinuityPresentationTests: XCTestCase {
     }
     private static var retainedCoordinators: [MapViewRepresentable.Coordinator] = []
 
-    func testOnlineChildZoomsKeepNativePixelsAndStopAtSeventeen() async throws {
+    func testOnlineOverzoomKeepsNativePixelsBeyondDistrictDetail() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKey = scene.windows.first { $0.isKeyWindow }
         let window = UIWindow(windowScene: scene)
@@ -103,29 +103,43 @@ final class RasterContinuityPresentationTests: XCTestCase {
         XCTAssertEqual(displayedZoom(), 15, accuracy: 0.05)
         XCTAssertGreaterThan(capture(map).redFraction, 0.99)
         var minimumCoverage = 1.0
-        for (target, delta) in [(16.0, 1), (17.0, 1), (17.0, 1), (16.0, -1)] {
+        var previousZoom = displayedZoom()
+        for (step, delta) in [1, 1, 1, 1, -1].enumerated() {
+            let target = previousZoom + Double(delta)
             coordinator.zoom(map, delta: delta)
             for _ in 0..<24 {
                 try await Task.sleep(for: .milliseconds(25))
                 minimumCoverage = min(minimumCoverage, capture(map).redFraction)
             }
-            XCTAssertEqual(displayedZoom(), target, accuracy: 0.05)
+            let acceptedZoom = displayedZoom()
+            if step == 3 {
+                // This tap may reach MapKit's native limit below z19. Its
+                // camera regression is covered separately; retain pixels here.
+                XCTAssertGreaterThan(acceptedZoom, 18)
+                XCTAssertLessThanOrEqual(acceptedZoom, target + 0.05)
+            } else {
+                XCTAssertEqual(acceptedZoom, target, accuracy: 0.05)
+            }
             coordinator.clampZoomIfNeeded(map)
-            XCTAssertEqual(displayedZoom(), target, accuracy: 0.05,
-                           "Settling a pinch at zoom 16/17 must not return online maps to zoom 15")
+            XCTAssertEqual(displayedZoom(), acceptedZoom, accuracy: 0.05,
+                           "Settling a pinch must preserve camera zoom above native district detail")
+            previousZoom = acceptedZoom
             XCTAssertTrue(coordinator.mapView(map, rendererFor: overlay) === renderer)
             let detail = try XCTUnwrap(overlay.continuity.snapshot().detail)
             XCTAssertFalse(detail.images.isEmpty)
             XCTAssertTrue(detail.coordinates.allSatisfy { $0.z == 15 })
         }
-        // Pinch gestures use the same upper limit as the plus button.
-        map.setVisibleMapRect(rect(at: 18), animated: false)
+        // Pinch gestures remain at the user's scale, just like the plus button.
+        map.setVisibleMapRect(rect(at: 19), animated: false)
+        try await Task.sleep(for: .milliseconds(500))
+        let acceptedPinchZoom = displayedZoom()
+        XCTAssertGreaterThan(acceptedPinchZoom, 18)
         coordinator.clampZoomIfNeeded(map)
-        XCTAssertEqual(displayedZoom(), 17, accuracy: 0.05)
-        XCTAssertEqual(requests.levels.max(), 15, "Zoom 16/17 must request only native parent tiles")
+        XCTAssertEqual(displayedZoom(), acceptedPinchZoom, accuracy: 0.05)
+        XCTAssertEqual(requests.levels.max(), 15, "Overzoom must request only native parent tiles")
         XCTAssertGreaterThan(minimumCoverage, 0.99, "Child zooms must preserve district imagery")
-        attach(capture(map).image, name: "online-native-parents-at-zoom-17")
-        print("ONLINE_CHILD_ZOOM", "96 sampled frames; minimum coverage:", minimumCoverage,
+        attach(capture(map).image, name: "online-native-parents-at-close-camera-zoom")
+        print("ONLINE_CHILD_ZOOM", "120 sampled frames; minimum coverage:", minimumCoverage,
               "maximum source zoom:", requests.levels.max() ?? -1)
         _ = delegate
     }

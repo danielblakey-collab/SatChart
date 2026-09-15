@@ -10,13 +10,21 @@ struct OnlineDistrictMapsTests {
     @Test func newVersionsAreDownloadableAndMatchPublishedOnlinePacks() {
         #expect(DistrictID.egegik.packs.compactMap(\.districtMapVersion) == Array(3...7))
         #expect(DistrictID.ugashik.packs.compactMap(\.districtMapVersion) == Array(4...6))
-        #expect(DistrictID.togiak.packs.compactMap(\.districtMapVersion) == [1])
+        #expect(DistrictID.togiak.packs.compactMap(\.districtMapVersion) == Array(1...15))
         for source in OnlineDistrictMapCatalog.maps {
             #expect(source.pack.district.packs.contains(source.pack))
             #expect(source.pack.remoteMBTilesFilenameCandidates.first == "\(source.pack.slug).mbtiles")
             #expect(source.pack.previewFilenameCandidates.first == "\(source.pack.slug).jpg")
         }
         #expect(Set(OnlineDistrictMapCatalog.maps.map(\.pack.district)) == [.egegik, .ugashik, .nushagak, .naknek_kvichak])
+    }
+
+
+    @Test func togiakLocalInventoryRecognizesAllSupportedPackageNames() {
+        let packs = DistrictID.togiak.packs
+        #expect(packs.map(\.slug) == ["togiak"] + (2...15).map { "togiak_v\($0)" })
+        #expect(packs.map { $0.previewFilenameCandidates.first } == ["togiak.jpg"] + (2...15).map { "togiak_v\($0).jpg" })
+        #expect(packs.map { $0.remoteMBTilesFilenameCandidates.first } == ["togiak.mbtiles"] + (2...15).map { "togiak_v\($0).mbtiles" })
     }
 
     @Test func onlineVersionSelectionUsesActualVersionsAndWraps() {

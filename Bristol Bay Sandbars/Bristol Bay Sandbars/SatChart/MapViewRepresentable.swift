@@ -1355,11 +1355,13 @@ struct MapViewRepresentable: UIViewRepresentable {
         func zoom(_ mapView: MKMapView, delta: Int) {
             // delta: +1 zoom in, -1 zoom out
             let currentZoom = zoomGate.targetZoom ?? zoomLevel(for: mapView)
-            let maximumZoom = currentMaximumZoom
+            // Satellite-backed modes use MapKit's camera range, independently of
+            // district tile detail. Bound request arithmetic to the tile planner's
+            // supported range so coalesced taps cannot overflow pow/Int conversion;
+            // MapKit applies its own physical camera limit before reaching z30.
+            let maximumZoom = applicationMaximumCameraZoom ?? 30
 
-            // IMPORTANT:
-            // - Do NOT clamp zoom-out to `minZForTiles`. That value is for tile visibility, not user zoom range.
-            // - Allow zooming out to the full world (0.0). Keep the max zoom-in clamp for the active basemap.
+            // The native tile minimum also must not restrict zooming out to the world.
             let targetZoom = max(0.0, min(maximumZoom, currentZoom + Double(delta)))
             guard targetZoom.isFinite else { return }
 
@@ -1388,11 +1390,16 @@ struct MapViewRepresentable: UIViewRepresentable {
         var sstOverlayKey: String?
         var currentSSTOpacity: Double = 0.0
 
-        private var currentMaximumZoom: Double {
+        /// A tile source's native/detail limit must not constrain Apple Satellite's
+        /// camera, including when it backs a district mode outside raster coverage.
+        /// Nil leaves both button zoom and settled pinch zoom to MapKit's own range.
+        private var applicationMaximumCameraZoom: Double? {
             switch basemapChoice {
+            case .appleSatellite, .districtsOnline, .districtsOffline:
+                return nil
             case .topoOnline:
                 return max(maxZ, Double(USGSTopoOnlineTileOverlay.nativeMaximumZ))
-            case .districtsOnline, .districtsOffline, .appleSatellite, .bristolBaySatelliteOffline:
+            case .bristolBaySatelliteOffline:
                 return extendedOfflineMaxZ
             default:
                 return maxZ
@@ -3241,8 +3248,8 @@ struct MapViewRepresentable: UIViewRepresentable {
                 mapView.mapType = .satellite
             }
 
-            // Both district modes display native zoom-15 parents at zooms 16–17.
-            // Keep the baywide backing imagery available at the same display zooms.
+            // Preserve the overlay's request range. Its continuity renderer draws
+            // native parents at higher camera zooms without fetching child tiles.
             let displayMaximumZ = basemapChoice == .districtsOffline || basemapChoice == .districtsOnline
                 ? extendedOfflineMaxZForTiles
                 : maxZForTiles
@@ -3293,9 +3300,8 @@ struct MapViewRepresentable: UIViewRepresentable {
                 role: .basemap,
                 storageSchemeOverride: package.storageScheme,
                 minimumZoom: minimumZoom,
-                // The camera remains free to reach z17, but native z15 parents are
-                // drawn by the continuity renderer instead of manufacturing 4/16
-                // encoded children for every downloaded Bristol Bay tile.
+                // Camera overzoom uses native parents through the continuity
+                // renderer instead of manufacturing encoded child tiles.
                 maximumZoom: nativeMaximumZoom,
                 tileSizePixels: package.tileWidth,
                 maximumFallbackDepth: 6,
@@ -3671,8 +3677,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         // MARK: - Zoom clamp
 
         func clampZoomIfNeeded(_ mapView: MKMapView) {
+            guard let maximumZoom = applicationMaximumCameraZoom else { return }
             let currentZoom = zoomLevel(for: mapView)
-            let maximumZoom = currentMaximumZoom
             guard currentZoom > maximumZoom else { return }
 
             let center = mapView.centerCoordinate

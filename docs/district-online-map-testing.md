@@ -17,7 +17,7 @@ Branch: `codex/refine-landscape-top-hud`
 
 1. Open `Bristol Bay Sandbars/Bristol Bay Sandbars/SatChart.xcodeproj` in the SatChart-Dev working copy and run the `SatChart` scheme.
 2. Choose **Districts Online** and pan to Egegik, approximately **58.246° N, 157.454° W**. No district downloads are needed.
-3. Tap **Map v#** through the discovered versions (currently v3–v7), then pan to Ugashik, Nushagak, and Naknek to compare their published imagery. Long-press the button and choose **Refresh online map versions** after uploading a new pyramid. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses zoom-15 parents for display zooms 16–17, matching Districts Offline. Both the plus button and pinch gestures stop at display zoom 17.
+3. Tap **Map v#** through the discovered versions (currently v3–v7), then pan to Ugashik, Nushagak, and Naknek to compare their published imagery. Long-press the button and choose **Refresh online map versions** after uploading a new pyramid. Compare imagery while panning and zooming within the district. Online district imagery uses native zooms 4–15 and reuses those parents at closer camera scales, matching Districts Offline. Satellite and both Districts modes use MapKit’s camera range for both plus-button and pinch zoom, including outside district coverage.
 4. Open **Menu → Download Offline Maps** and download the desired Egegik variants. Confirm the preview, completed status, and download size.
 5. Choose **Districts Offline** and cycle through the downloaded maps. Its existing selector cycles downloaded entries; when only v4–v7 are downloaded, its cycle positions 1–4 correspond to those four packages.
 6. Test the downloaded district area in airplane mode. Return online, switch back to **Districts Online**, and confirm its previous online selection is restored. Switch to Satellite or NOAA and check that no district online imagery remains.
@@ -65,13 +65,19 @@ The version-handoff change built successfully for the iOS 26.1 iPad simulator. A
 
 For device acceptance, leave v4 visible, then cycle versions while watching the district shoreline. The old imagery should stay until the selected version is ready. Repeat with a weak connection, rapid taps, and a pan during loading; no stale response should restore an older selection and no temporary Apple-map gap should appear inside opaque district imagery.
 
-## Online child zooms 16–17
+## Camera zoom and native district detail
 
-Districts Online now shares the offline camera limit of 17. Its existing continuity renderer scales retained native zoom-15 parents at zooms 16 and 17; no zoom-16/17 XYZ objects are required. The Bristol Bay online backing layer uses the same display limit. Version handoffs continue to prepare the current view using native parents and retain the same overlay and renderer.
+Satellite, Districts Online, and Districts Offline leave the camera maximum to MapKit. The former shared application maximum of 17 constrained Apple Satellite outside district coverage and was reapplied by the delayed pinch-settle callback. Camera limits are now separate from native tile detail. Other basemap modes retain their existing application limits.
 
-The live MapKit child-zoom regression exercises 15 → 16 → 17, an extra plus tap at the limit, zooming out, and the pinch clamp. It checks visible imagery throughout the animation, renderer identity, and that network source requests never exceed zoom 15.
+The plus button bounds its request arithmetic to zoom 30 (the tile planner’s supported range); MapKit applies its native camera limit. Settled camera updates do not impose a district-derived ceiling in these three modes. Their behavior is independent of district bounds, installed packages, or online inventory.
 
-Child-zoom verification: the iPad simulator build and all 29 selected tests passed across the online catalog, version handoff, raster continuity, and presentation suites. The new live test sampled 96 zoom frames with 100% coverage of its opaque test area and a maximum requested source zoom of 15. The real v4/v5 version-switch check also retained all 96 sampled frames. Physical-device acceptance should repeat plus-button and pinch zooms to 16/17, then switch versions at that scale.
+District and Bristol Bay continuity renderers enlarge available native parents when the camera moves closer. No higher-resolution XYZ pyramid or synthetic child tiles are requested. Native source limits, package identities, tile budgets, and version handoffs stay the same.
+
+`MapCameraZoomRegressionTests` covers the real coordinator’s button and delayed settle paths outside district coverage, crossing district bounds, native MapKit camera limits, and unaffected basemap limits. `RasterContinuityPresentationTests.testOnlineOverzoomKeepsNativePixelsBeyondDistrictDetail` exercises zoom 15 → 16 → 17 → 18 → 19 (or MapKit’s measured maximum when lower), zoom-out, and a pinch camera at that closer scale. It checks visible imagery throughout the animation, renderer identity, and source requests capped at 15.
+
+Verification on September 15, 2026: the iOS 26.1 iPad 9 simulator build passed. All 28 selected cases passed across the final focused runs: 15 camera cases, 10 raster-continuity cases, and 3 live presentation cases. The previous camera policy failed all 12 affected-mode camera cases while the 3 unrelated-mode cases passed. The live overzoom presentation test sampled 120 frames, requiring over 99% coverage of its synthetic opaque imagery and source requests no higher than zoom 15.
+
+Physical-device acceptance: in each of the three modes, zoom in with both the plus button and pinch outside district coverage; wait several seconds and confirm the camera stays at the chosen scale. Pan into and out of a district, then repeat while switching district versions. Verify zoom-out still works at MapKit’s closest camera scale.
 
 ## Automatic district discovery verification — September 8, 2026
 

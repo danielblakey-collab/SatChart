@@ -545,6 +545,10 @@ nonisolated enum MBTilesPackageValidator {
     private static func identitiesAreCompatible(expected: String, actual: String) -> Bool {
         let lhs = normalizedPackageIdentity(expected)
         let rhs = normalizedPackageIdentity(actual)
+        // The shipped bristol_bay.mbtiles retains its original export name.
+        // Accept only this known package/name pair; the bytes, SQLite, coverage,
+        // and raster checks still run before activation.
+        if lhs == "bristol_bay", rhs == "bbay_entire_bay_z4_13" { return true }
         // Versioned Naknek aliases must match exactly (e.g. v1 is not v15).
         if lhs.hasPrefix("naknek_kvichak_v"), rhs.hasPrefix("naknek_kvichak_v") {
             return lhs == rhs

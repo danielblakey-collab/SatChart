@@ -283,17 +283,18 @@ private struct HUDCoordinateEntryFields: View {
     @Binding var longitudeMinutes: String
     @Binding var longitudeHemisphere: String
     let onSubmit: () -> Void
+    var stacked = false
+    var scrollsHorizontally = true
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+        if stacked {
+            VStack(alignment: .leading, spacing: 4) {
                 coordinateGroup(
                     degrees: $latitudeDegrees,
                     minutes: $latitudeMinutes,
                     hemisphere: $latitudeHemisphere,
                     hemispherePlaceholder: "N/S"
                 )
-
                 coordinateGroup(
                     degrees: $longitudeDegrees,
                     minutes: $longitudeMinutes,
@@ -301,8 +302,45 @@ private struct HUDCoordinateEntryFields: View {
                     hemispherePlaceholder: "E/W"
                 )
             }
-            .fixedSize(horizontal: true, vertical: false)
+            .fixedSize(horizontal: true, vertical: true)
+        } else {
+            inlineFields
         }
+    }
+
+    @ViewBuilder
+    private var inlineFields: some View {
+        if scrollsHorizontally {
+            // Prefer the fields' natural width so the surrounding background
+            // hugs the coordinates. Keep scrolling for constrained layouts.
+            ViewThatFits(in: .horizontal) {
+                coordinateRow
+                ScrollView(.horizontal, showsIndicators: false) {
+                    coordinateRow
+                }
+            }
+        } else {
+            coordinateRow
+        }
+    }
+
+    private var coordinateRow: some View {
+        HStack(spacing: 6) {
+            coordinateGroup(
+                degrees: $latitudeDegrees,
+                minutes: $latitudeMinutes,
+                hemisphere: $latitudeHemisphere,
+                hemispherePlaceholder: "N/S"
+            )
+
+            coordinateGroup(
+                degrees: $longitudeDegrees,
+                minutes: $longitudeMinutes,
+                hemisphere: $longitudeHemisphere,
+                hemispherePlaceholder: "E/W"
+            )
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func coordinateGroup(
@@ -1273,7 +1311,10 @@ struct MapView: View {
                             hiddenTopHUDControlRow(availableWidth: availableWidth)
                         }
 
-                        if showNavTopHUDDisplay && hasVisibleTopActionRow {
+                        // Expanded iPad portrait keeps sharing and action controls
+                        // inside the HUD, in the same groups as landscape.
+                        if UIDevice.current.userInterfaceIdiom != .pad
+                            && showNavTopHUDDisplay && hasVisibleTopActionRow {
                             responsiveTopHUDShareButtons(landscape: false)
                         }
 
@@ -1448,12 +1489,16 @@ struct MapView: View {
     }
 
     private func responsiveTopHUDCard(availableWidth: CGFloat, landscape: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let usesPortraitIPadLayout = UIDevice.current.userInterfaceIdiom == .pad && !landscape
+
+        return VStack(alignment: .leading, spacing: 4) {
             if isTopHUDCollapsed {
                 topHUDControlRow
             } else {
                 if landscape {
                     landscapeExpandedTopHUD(availableWidth: availableWidth)
+                } else if usesPortraitIPadLayout {
+                    portraitExpandedTopHUD
                 } else {
                     compactExpandedTopHUDHeader(availableWidth: availableWidth, landscape: false)
 
@@ -1503,8 +1548,125 @@ struct MapView: View {
         .padding(.horizontal, isTopHUDCollapsed ? 0 : 4)
         .padding(.vertical, isTopHUDCollapsed ? 0 : 4)
         .frame(width: availableWidth, alignment: .topLeading)
-        .background(isTopHUDCollapsed || !showNavTopHUDOpacity ? Color.clear : scSurface.opacity(0.78))
+        .background(isTopHUDCollapsed || !showNavTopHUDOpacity
+                    ? Color.clear : scSurface.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    /// Portrait uses the landscape groups, with a narrower tide panel. The
+    /// layout measures the readouts so small windows can add rows without
+    /// shrinking buttons or hiding any coordinate fields.
+    private var portraitExpandedTopHUD: some View {
+        let hasReadouts = showNavWindReadout || showNavSpeedReadout || showNavBoundaryReadout
+        let hasTide = showNavTideHUD || showOfflineModeInTopHUDLocation
+
+        return PortraitTopHUDLayout(
+            showReadouts: hasReadouts,
+            showSharing: hasVisibleTopHUDShareControls,
+            showLocation: showNavLocationReadout,
+            showTide: hasTide,
+            showActions: hasVisibleTopHUDActionControls,
+            locationLabelWidth: showNavSpeedReadout ? topHUDLocationLabelWidth : nil
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                landscapeTopHUDPrimaryButtons
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                if hasReadouts { portraitTopHUDReadouts }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                if hasVisibleTopHUDShareControls { landscapeTopHUDShareButtons }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                if showNavLocationReadout { portraitTopHUDLocation }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                if showNavTideHUD {
+                    tideHUDBox(
+                        height: landscapeTopHUDBoxHeight,
+                        chartHeight: landscapeTopHUDMiniTideChartHeight
+                    )
+                } else if showOfflineModeInTopHUDLocation {
+                    offlineModeHUDPlaceholder
+                        .frame(height: landscapeTopHUDBoxHeight)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                if hasVisibleTopHUDActionControls { landscapeTopHUDActionButtons }
+            }
+        }
+        .accessibilityIdentifier("navigationPortraitTopHUD")
+    }
+
+    private var portraitTopHUDReadouts: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if showNavWindReadout { topHUDWindForecast }
+
+            if showNavSpeedReadout || showNavBoundaryReadout {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        if showNavSpeedReadout { topHUDSpeedReadout }
+                        if showNavBoundaryReadout { topHUDBoundaryReadout }
+                    }
+                    .fixedSize(horizontal: true, vertical: true)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        if showNavSpeedReadout { topHUDSpeedReadout }
+                        if showNavBoundaryReadout { topHUDBoundaryReadout }
+                    }
+                    .fixedSize(horizontal: true, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("navigationPortraitHUDReadouts")
+    }
+
+    private var portraitTopHUDLocation: some View {
+        ViewThatFits(in: .horizontal) {
+            portraitLocationReadout(stacked: false)
+            portraitLocationReadout(stacked: true)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var topHUDLocationLabelWidth: CGFloat {
+        let title = isCursorTrackingUser ? "Location:" : "Cursor:"
+        let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        return (title as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+    }
+
+    private func portraitLocationReadout(stacked: Bool) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isCursorTrackingUser ? "Location:" : "Cursor:")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .fixedSize(horizontal: true, vertical: false)
+                if stacked { liveCursorStatusIndicator }
+            }
+            .frame(width: topHUDLocationLabelWidth, alignment: .leading)
+
+            HUDCoordinateEntryFields(
+                latitudeDegrees: $cursorLatDegInput,
+                latitudeMinutes: $cursorLatMinInput,
+                latitudeHemisphere: $cursorLatHemInput,
+                longitudeDegrees: $cursorLonDegInput,
+                longitudeMinutes: $cursorLonMinInput,
+                longitudeHemisphere: $cursorLonHemInput,
+                onSubmit: applyCursorInputsAndPan,
+                stacked: stacked,
+                scrollsHorizontally: false
+            )
+
+            if !stacked && radioGroup.isLiveSharing { liveCursorStatusIndicator }
+        }
+        .fixedSize(horizontal: true, vertical: true)
+        .hudBoxSmall()
     }
 
     private func compactExpandedTopHUDHeader(availableWidth: CGFloat, landscape: Bool) -> some View {
@@ -1614,6 +1776,7 @@ struct MapView: View {
         return min(max(available, 220), maximum)
     }
 
+    @ViewBuilder
     private func landscapeExpandedTopHUD(availableWidth: CGFloat) -> some View {
         let contentWidth = max(0, availableWidth - 8)
         let showsTideColumn = showNavTideHUD || showOfflineModeInTopHUDLocation
@@ -1627,8 +1790,14 @@ struct MapView: View {
         let shareButtonWidth = hasVisibleTopHUDShareControls
             ? buttonGroupWidth(count: 2, spacing: mapControlDefaultSpacing)
             : 0
-        let locationLeading = shareButtonWidth
+        let defaultLocationLeading = shareButtonWidth
             + (hasVisibleTopHUDShareControls && showNavLocationReadout ? 6 : 0)
+        // Match portrait: latitude's first box shares the visible Speed text
+        // anchor. Both readouts have the same outer horizontal padding.
+        let locationLeading = UIDevice.current.userInterfaceIdiom == .pad && showNavSpeedReadout
+            ? max(defaultLocationLeading,
+                  primaryButtonWidth + mapControlDefaultSpacing - topHUDLocationLabelWidth - 6)
+            : defaultLocationLeading
         let desiredLocationTrailing = showNavLocationReadout
             ? locationLeading + topHUDLocationFixedWidth
             : 0
@@ -1665,75 +1834,83 @@ struct MapView: View {
         let centerReadoutWidth = max(0, leftWidth - centerReadoutLeading)
         let windReadoutWidth = min(landscapeWindReadoutWidth, centerReadoutWidth)
 
-        return HStack(alignment: .top, spacing: mapControlDefaultSpacing) {
-            ZStack(alignment: .topLeading) {
-                landscapeTopHUDPrimaryButtons
-                    .zIndex(2)
+        if UIDevice.current.userInterfaceIdiom == .pad && showNavLocationReadout
+            && showNavSpeedReadout && locationWidth < topHUDLocationFixedWidth {
+            // Narrow landscape windows use the same measured groups as
+            // portrait so moving the fields never hides the longitude or Live.
+            portraitExpandedTopHUD
+        } else {
+            HStack(alignment: .top, spacing: mapControlDefaultSpacing) {
+                ZStack(alignment: .topLeading) {
+                    landscapeTopHUDPrimaryButtons
+                        .zIndex(2)
 
-                if hasVisibleTopHUDShareControls || showNavLocationReadout {
-                    HStack(alignment: .center, spacing: 6) {
-                        if hasVisibleTopHUDShareControls {
-                            landscapeTopHUDShareButtons
-                        }
-
-                        if showNavLocationReadout {
-                            topHUDCurrentLocation
-                                .frame(width: locationWidth, alignment: .leading)
-                        }
-                    }
-                    .offset(y: mapControlButtonSize + mapControlDefaultSpacing)
-                }
-
-                if showNavWindReadout || showNavSpeedReadout || showNavBoundaryReadout {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if showNavWindReadout {
-                            topHUDWindForecast
-                                .frame(width: windReadoutWidth, alignment: .leading)
-                        }
-
-                        if showNavSpeedReadout || showNavBoundaryReadout {
-                            HStack(alignment: .center, spacing: 6) {
-                                if showNavSpeedReadout {
-                                    topHUDSpeedReadout
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-
-                                if showNavBoundaryReadout {
-                                    topHUDBoundaryReadout
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.65)
-                                }
+                    if hasVisibleTopHUDShareControls || showNavLocationReadout {
+                        HStack(alignment: .center, spacing: 6) {
+                            if hasVisibleTopHUDShareControls {
+                                landscapeTopHUDShareButtons
                             }
-                            .frame(width: centerReadoutWidth, alignment: .leading)
+
+                            if showNavLocationReadout {
+                                topHUDCurrentLocation
+                                    .frame(width: locationWidth, alignment: .leading)
+                                    .padding(.leading, locationLeading - defaultLocationLeading)
+                            }
                         }
+                        .offset(y: mapControlButtonSize + mapControlDefaultSpacing)
                     }
-                    .frame(width: centerReadoutWidth, alignment: .topLeading)
-                    .offset(x: centerReadoutLeading)
+
+                    if showNavWindReadout || showNavSpeedReadout || showNavBoundaryReadout {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if showNavWindReadout {
+                                topHUDWindForecast
+                                    .frame(width: windReadoutWidth, alignment: .leading)
+                            }
+
+                            if showNavSpeedReadout || showNavBoundaryReadout {
+                                HStack(alignment: .center, spacing: 6) {
+                                    if showNavSpeedReadout {
+                                        topHUDSpeedReadout
+                                            .fixedSize(horizontal: true, vertical: false)
+                                    }
+
+                                    if showNavBoundaryReadout {
+                                        topHUDBoundaryReadout
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.65)
+                                    }
+                                }
+                                .frame(width: centerReadoutWidth, alignment: .leading)
+                            }
+                        }
+                        .frame(width: centerReadoutWidth, alignment: .topLeading)
+                        .offset(x: centerReadoutLeading)
+                    }
+                }
+                .frame(width: leftWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
+
+                if showNavTideHUD {
+                    tideHUDBox(
+                        height: landscapeTopHUDBoxHeight,
+                        chartHeight: landscapeTopHUDMiniTideChartHeight
+                    )
+                    .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
+                } else if showOfflineModeInTopHUDLocation {
+                    offlineModeHUDPlaceholder
+                        .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topTrailing)
+                }
+
+                if showsActionColumn {
+                    landscapeTopHUDActionButtons
                 }
             }
-            .frame(width: leftWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
-
-            if showNavTideHUD {
-                tideHUDBox(
-                    height: landscapeTopHUDBoxHeight,
-                    chartHeight: landscapeTopHUDMiniTideChartHeight
-                )
-                .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topLeading)
-            } else if showOfflineModeInTopHUDLocation {
-                offlineModeHUDPlaceholder
-                    .frame(width: tideWidth, height: landscapeTopHUDBoxHeight, alignment: .topTrailing)
-            }
-
-            if showsActionColumn {
-                landscapeTopHUDActionButtons
-            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: landscapeTopHUDBoxHeight,
+                maxHeight: landscapeTopHUDBoxHeight,
+                alignment: .topLeading
+            )
         }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: landscapeTopHUDBoxHeight,
-            maxHeight: landscapeTopHUDBoxHeight,
-            alignment: .topLeading
-        )
     }
 
     private var landscapeTopHUDPrimaryButtons: some View {
@@ -2530,6 +2707,8 @@ struct MapView: View {
                 .foregroundColor(showNavTopHUDOpacity ? scTextPrimary : .white)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
+                .frame(width: UIDevice.current.userInterfaceIdiom == .pad ? topHUDLocationLabelWidth : nil,
+                       alignment: .leading)
 
             HUDCoordinateEntryFields(
                 latitudeDegrees: $cursorLatDegInput,
@@ -2541,7 +2720,7 @@ struct MapView: View {
                 onSubmit: applyCursorInputsAndPan
             )
 
-            liveCursorStatusIndicator
+            if radioGroup.isLiveSharing { liveCursorStatusIndicator }
         }
         .hudBoxSmall()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2881,7 +3060,12 @@ struct MapView: View {
     }
 
     private func landscapeBottomControlBottomPadding(_ safeAreaInsets: EdgeInsets) -> CGFloat {
-        max(0, min(safeAreaInsets.bottom * 0.08, 2))
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Give the entire button/scale row a visible lift above the bottom
+            // edge, including iPads whose bottom safe-area inset is zero.
+            return bottomControlBottomPadding(safeAreaInsets) + 16
+        }
+        return max(0, min(safeAreaInsets.bottom * 0.08, 2))
     }
 
     private func controlsStack(size: CGSize, safeAreaInsets: EdgeInsets) -> some View {
@@ -6426,7 +6610,7 @@ struct SettingsScreenLayoutOptionsPageView: View {
 }
 
 struct SettingsPageView: View {
-    @AppStorage("keepDisplayOnWhileAppInUse") private var keepDisplayOnWhileAppInUse: Bool = false
+    @AppStorage("keepDisplayOnWhileAppInUse") private var keepDisplayOnWhileAppInUse: Bool = true
 
     var body: some View {
         ZStack {

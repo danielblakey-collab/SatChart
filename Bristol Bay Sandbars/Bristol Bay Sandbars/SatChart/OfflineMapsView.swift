@@ -6,34 +6,42 @@ private let offlineMapsNavBlue = Color(red: 0.03, green: 0.23, blue: 0.48)
 
 struct OfflineMapsView: View {
 
-    private let r2BaseURL = URL(string: "https://pub-832b588ef9ec4a588045736b6ce409b9.r2.dev")!
-
     @StateObject private var offline = OfflineMapsManager.shared
+    @StateObject private var availability = OfflineDistrictPackAvailability.shared
+    @State private var previewRetryGeneration = 0
 
-    private var packsByDistrict: [DistrictID: [OfflinePack]] {
-        var result: [DistrictID: [OfflinePack]] = [:]
-        for district in DistrictID.allCases {
-            result[district] = district.packs
+    /// Keep installed files and in-flight downloads manageable even if R2 removes a version.
+    private func retainedPacks(for district: DistrictID) -> [OfflinePack] {
+        let published = Set(availability.packs(for: district))
+        var retained = offline.downloadedDistrictMapPacks(for: district).filter { !published.contains($0) }
+        for pack in district.supportedLocalMapPacks where offline.isDownloading[pack.slug] == true {
+            if !published.contains(pack), !retained.contains(pack) { retained.append(pack) }
         }
-        return result
+        if let active = offline.activePack, active.isDistrictMapPack,
+           active.district == district, !published.contains(active), !retained.contains(active) {
+            retained.append(active)
+        }
+        return retained.sorted { ($0.districtMapVersion ?? 0) < ($1.districtMapVersion ?? 0) }
     }
 
     private var basemapPacks: [OfflinePack] { OfflinePack.basemapPacks }
 
     private func mbtilesURLs(for pack: OfflinePack) -> [URL] {
-        pack.remoteMBTilesFilenameCandidates.map { r2BaseURL.appendingPathComponent($0) }
+        availability.mbtilesURLs(for: pack)
     }
 
     private func previewURLs(for pack: OfflinePack) -> [URL] {
-        pack.previewFilenameCandidates.map { r2BaseURL.appendingPathComponent($0) }
+        availability.previewURLs(for: pack)
     }
 
     @ViewBuilder
-    private func packRows(_ packs: [OfflinePack]) -> some View {
+    private func packRows(_ packs: [OfflinePack], showsPreview: Bool = true) -> some View {
         ForEach(packs) { pack in
             PackCard(
                 pack: pack,
                 previewURLs: previewURLs(for: pack),
+                showsPreview: showsPreview,
+                previewRetryGeneration: previewRetryGeneration,
                 onAppear: {
                     offline.fetchRemoteSizeIfNeeded(pack: pack, urls: mbtilesURLs(for: pack))
                 },
@@ -66,9 +74,33 @@ struct OfflineMapsView: View {
                             .padding(.horizontal, 16)
                     }
 
+                    if availability.isRefreshing {
+                        ProgressView("Checking available district maps…")
+                            .font(.footnote)
+                            .padding(.horizontal, 16)
+                    }
+                    if availability.discoveryUnavailable {
+                        Text(availability.packs.isEmpty
+                             ? "Connect to the internet to check available district maps."
+                             : "Couldn’t check for new district maps. Showing previously verified versions.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                    }
+
                     ForEach(DistrictID.allCases, id: \.self) { district in
-                        SectionHeader(title: district.displayName)
-                        if let packs = packsByDistrict[district] { packRows(packs) }
+                        let published = availability.packs(for: district)
+                        let retained = retainedPacks(for: district)
+                        if !published.isEmpty || !retained.isEmpty {
+                            SectionHeader(title: district.displayName)
+                            packRows(published)
+                            if !retained.isEmpty {
+                                Text("Downloads on this device")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(.horizontal, 16)
+                                packRows(retained, showsPreview: false)
+                            }
+                        }
                     }
 
                     if !basemapPacks.isEmpty {
@@ -80,6 +112,14 @@ struct OfflineMapsView: View {
                 }
                 .padding(.top, 12)
             }
+        }
+        .task {
+            await availability.refresh()
+            previewRetryGeneration += 1
+        }
+        .refreshable {
+            await availability.refresh(force: true)
+            previewRetryGeneration += 1
         }
         .environment(\.colorScheme, .dark)
         .foregroundColor(.white)
@@ -126,7 +166,13 @@ private final class PackPreviewLoader: ObservableObject {
     @Published var phase: Phase = .idle
     private var hasStarted = false
 
-    func load(urls: [URL]) {
+    func retryFailed(urls: [URL], usesBlackBackground: Bool) {
+        guard case .failed = phase else { return }
+        hasStarted = false
+        load(urls: urls, usesBlackBackground: usesBlackBackground)
+    }
+
+    func load(urls: [URL], usesBlackBackground: Bool) {
         guard !hasStarted else { return }
         hasStarted = true
 
@@ -142,7 +188,14 @@ private final class PackPreviewLoader: ObservableObject {
                         continue
                     }
 
-                    phase = .success(image)
+                    if usesBlackBackground {
+                        let preview = await Task.detached(priority: .utility) {
+                            OfflineBasemapPreview.image(from: data)
+                        }.value
+                        phase = .success(preview ?? image)
+                    } else {
+                        phase = .success(image)
+                    }
                     return
                 } catch {
                     continue
@@ -157,7 +210,19 @@ private final class PackPreviewLoader: ObservableObject {
 private extension OfflinePack {
     /// Source-image regions matched to the supplied Naknek/Nushagak references.
     /// Normalized coordinates keep the same geographic crop across map versions.
-    var thumbnailCrop: CGRect? {
+    func thumbnailCrop(for idiom: UIUserInterfaceIdiom) -> CGRect? {
+        // Fit the complete image on iPad, using the same centered, black-backed
+        // framing as Naknek/Nushagak instead of filling a wide 280-point card.
+        if idiom == .pad {
+            let fitsDistrict = isDistrictMapPack && (district == .egegik || district == .ugashik)
+            let fitsBasemap = Self.basemapPacks.contains { basemap in
+                basemap.remoteBasenameCandidates.contains(slug)
+            }
+            if fitsDistrict || fitsBasemap {
+                return CGRect(x: 0, y: 0, width: 1, height: 1)
+            }
+        }
+
         guard isDistrictMapPack else { return nil }
         switch district {
         case .naknek_kvichak:
@@ -211,6 +276,8 @@ private struct RemotePackPreview: View {
     let urls: [URL]
     let fallbackLabel: String
     let crop: CGRect?
+    let usesBlackBackground: Bool
+    let retryGeneration: Int
 
     @StateObject private var loader = PackPreviewLoader()
 
@@ -238,7 +305,10 @@ private struct RemotePackPreview: View {
             }
         }
         .onAppear {
-            loader.load(urls: urls)
+            loader.load(urls: urls, usesBlackBackground: usesBlackBackground)
+        }
+        .onChange(of: retryGeneration) { _ in
+            loader.retryFailed(urls: urls, usesBlackBackground: usesBlackBackground)
         }
     }
 }
@@ -248,6 +318,8 @@ private struct PackCard: View {
 
     let pack: OfflinePack
     let previewURLs: [URL]
+    let showsPreview: Bool
+    let previewRetryGeneration: Int
     let onAppear: () -> Void
     let onDownload: () -> Void
     let onDelete: () -> Void
@@ -282,26 +354,32 @@ private struct PackCard: View {
         let sizeToShow = localSize ?? remoteSize ?? (expected > 0 ? expected : nil)
 
         VStack(alignment: .leading, spacing: 10) {
-            GeometryReader { geo in
-                RemotePackPreview(
-                    urls: previewURLs,
-                    fallbackLabel: pack.previewFilenameCandidates.first ?? slug,
-                    crop: pack.thumbnailCrop
-                )
-                .allowsHitTesting(false)
-                .frame(width: geo.size.width, height: min(geo.size.height, 280))
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-            .frame(height: 280)
+            if showsPreview {
+                GeometryReader { geo in
+                    RemotePackPreview(
+                        urls: previewURLs,
+                        fallbackLabel: pack.previewFilenameCandidates.first ?? slug,
+                        crop: pack.thumbnailCrop(for: UIDevice.current.userInterfaceIdiom),
+                        usesBlackBackground: OfflineBasemapPreview.usesBlackBackground(for: pack),
+                        retryGeneration: previewRetryGeneration
+                    )
+                    .id(previewURLs)
+                    .allowsHitTesting(false)
+                    .frame(width: geo.size.width, height: min(geo.size.height, 280))
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                }
+                .frame(height: 280)
 
-            if let captureTide = pack.captureTide {
-                OfflineMapCaptureTideCaption(tide: captureTide)
-            } else if let previewDateLabel = pack.previewDateLabel {
-                Text(previewDateLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.white.opacity(0.78))
-                    .accessibilityLabel("Map date \(previewDateLabel)")
+                if let captureTide = pack.captureTide {
+                    OfflineMapCaptureTideCaption(tide: captureTide)
+                } else if let previewDateLabel = pack.previewDateLabel {
+                    Text(previewDateLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white.opacity(0.78))
+                        .accessibilityLabel("Map date \(previewDateLabel)")
+                }
+
             }
 
             HStack(alignment: .firstTextBaseline) {
@@ -424,6 +502,11 @@ private struct OfflineMapCaptureTideCaption: View {
                 .foregroundStyle(.white.opacity(0.85))
             Text(tide.eventLabel)
                 .foregroundStyle(.white.opacity(0.78))
+
+            if let referenceNote = tide.station.referenceNote {
+                Text(referenceNote)
+                    .foregroundStyle(.white.opacity(0.78))
+            }
 
             Link(tide.station.label, destination: tide.station.url)
                 .foregroundStyle(Color(red: 0.50, green: 0.75, blue: 1))

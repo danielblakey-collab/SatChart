@@ -46,10 +46,24 @@ struct OfflinePack: Identifiable, Hashable {
             add(slug.replacingOccurrences(of: "-", with: "_"))
         }
 
+        // Accept both the base name and explicit v1, consistently for discovery,
+        // downloads, previews, and recognition of already installed files.
+        if districtMapVersion == 1 {
+            let explicitV1 = "\(district.rawValue)_v1"
+            add(explicitV1)
+            add(explicitV1.replacingOccurrences(of: "_", with: "-"))
+        }
+
         // R2 also publishes this district under the shorter Naknek basename.
         // Keep the canonical slug for installed files, settings, and district identity.
         if district == .naknek_kvichak, let version = districtMapVersion {
-            add(version == 1 ? "naknek" : "naknek_v\(version)")
+            let shortName = version == 1 ? "naknek" : "naknek_v\(version)"
+            add(shortName)
+            add(shortName.replacingOccurrences(of: "_", with: "-"))
+            if version == 1 {
+                add("naknek_v1")
+                add("naknek-v1")
+            }
         }
 
         switch slug {

@@ -22,7 +22,7 @@ Missing `metadata.scheme` follows the MBTiles legacy TMS default. The one docume
 
 Runtime receipts use the coordinate envelope at the highest stored zoom as the authoritative display footprint. This prevents stale metadata from clipping native tiles or expanding a district overlay to the world; a declared `metadata.bounds` box that does not even intersect the native envelope fails validation. Lower zoom ancestors are deliberately excluded from the display footprint because a z0/world ancestor must not defeat geographic request suppression.
 
-Downloaded district maps, shoreline imagery, and the Bristol Bay satellite offline basemap may be displayed through zoom 17 while their source detail remains capped at zoom 15. At zooms 16 and 17 a custom overlay renderer draws the validated zoom-15 parent image directly into its MapKit rectangle. It does not manufacture, encode, publish, or persist a synthetic descendant pyramid.
+Downloaded district maps and shoreline imagery can be enlarged beyond their native detail while Districts Offline uses MapKit’s camera range. The standalone Bristol Bay satellite offline basemap retains its camera maximum of 17. Source detail remains capped at the package’s available native zoom, at most 15. At closer camera scales a custom overlay renderer draws the validated native parent image directly into its MapKit rectangle. It does not manufacture, encode, publish, or persist a synthetic descendant pyramid.
 
 ## Runtime scheduling and budgets
 
