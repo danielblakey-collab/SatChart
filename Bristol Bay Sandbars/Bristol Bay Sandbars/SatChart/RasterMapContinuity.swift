@@ -12,6 +12,7 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
         var detailPixelSize = 256
         var concurrentLoads = 4
         var localOverview = false
+        var cancelsSupersededLoads = false
         var imageBudget: RasterImageBudget?
         var cancelLoads: (() -> Void)?
     }
@@ -77,6 +78,16 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
         self.policy = policy
     }
 
+    deinit {
+        policy.cancelLoads?()
+        // Superseded, uninstalled versions can lose their last owner without an
+        // explicit invalidate(). Resolve both active and queued readiness callers.
+        let completions = (batch?.request.completions ?? []) + (pending?.completions ?? [])
+        completions.forEach { $0(false) }
+    }
+
+    private var cancelsSupersededLoads: Bool { policy.localOverview || policy.cancelsSupersededLoads }
+
     /// Retiring a chart releases its queued work and source-owned frames. A draw
     /// already in progress still owns its snapshot and its memory reservation.
     func invalidate(keepVisibleFrame: Bool = false) {
@@ -127,20 +138,18 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
             guard let self, !self.invalidated else { completion(false); return }
             let tiles = self.coordinates(in: rect, zoom: zoom, limit: self.policy.detailTiles)
             if tiles.isEmpty {
+                if self.cancelsSupersededLoads { self.cancelObsoleteBatch() }
                 completion(!rect.intersects(self.bounds))
                 return
             }
             if self.snapshot().detail?.coordinates == tiles {
-                if self.policy.localOverview {
-                    let obsolete = (self.batch?.request.completions ?? []) + (self.pending?.completions ?? [])
-                    self.batch = nil; self.pending = nil
-                    self.policy.cancelLoads?()
-                    obsolete.forEach { $0(false) }
+                if self.cancelsSupersededLoads {
+                    self.cancelObsoleteBatch()
                 }
                 completion(true)
                 return
             }
-            if self.policy.localOverview, let current = self.batch,
+            if self.cancelsSupersededLoads, let current = self.batch,
                !current.overview, current.request.coordinates == tiles {
                 if current.request.completions.count < 16 { current.request.completions.append(completion) }
                 else { completion(false) }
@@ -153,10 +162,14 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
                 self.pending = pending
                 return
             }
-            if self.policy.localOverview, let obsolete = self.batch {
+            if self.cancelsSupersededLoads, let obsolete = self.batch,
+               !obsolete.overview || self.policy.localOverview {
+                // A district-wide overview remains useful across in-bounds pans;
+                // let it finish while replacing only the pending detail viewport.
                 // A request for the already displayed viewport also cancels old
                 // work; late completions never publish an obsolete chart frame.
                 self.batch = nil
+                if obsolete.overview { self.overviewAttempted = false }
                 self.policy.cancelLoads?()
                 obsolete.request.completions.forEach { $0(false) }
             }
@@ -164,6 +177,14 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
             self.pending = Request(coordinates: tiles, completions: [completion])
             self.startNextIfNeeded()
         }
+    }
+
+    private func cancelObsoleteBatch() {
+        if batch?.overview == true { overviewAttempted = false }
+        let obsolete = (batch?.request.completions ?? []) + (pending?.completions ?? [])
+        batch = nil; pending = nil
+        policy.cancelLoads?()
+        obsolete.forEach { $0(false) }
     }
 
     private func startNextIfNeeded() {
@@ -283,7 +304,7 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
                         self.load(tile, work: work, attempt: attempt + 1)
                     }
                     return
-                case .cancelled where self.policy.localOverview:
+                case .cancelled where self.cancelsSupersededLoads:
                     // A store purge (memory/background pressure) terminates the
                     // whole batch, not just one tile followed by another request.
                     let callbacks = work.request.completions + (self.pending?.completions ?? [])
@@ -346,8 +367,11 @@ nonisolated final class RasterMapContinuity: @unchecked Sendable {
     static func decode(_ data: Data?, error: Error?, completion: @escaping (MBTilesBackstopLoadOutcome) -> Void) {
         decodingQueue.async {
             guard let data else {
-                completion(error == nil || (error as? BristolBaySatelliteTileStoreError) == .notFound
-                           ? .missing : .transientFailure)
+                if (error as? URLError)?.code == .cancelled { completion(.cancelled) }
+                else {
+                    completion(error == nil || (error as? BristolBaySatelliteTileStoreError) == .notFound
+                               ? .missing : .transientFailure)
+                }
                 return
             }
             let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary

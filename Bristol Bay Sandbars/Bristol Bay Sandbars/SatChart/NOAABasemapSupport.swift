@@ -151,7 +151,7 @@ final class BristolBaySatelliteTileOverlay: MKTileOverlay {
         59.283_382_128_638_735
     ]) ?? .world
 
-    private static let baseURL = URL(string: "https://pub-832b588ef9ec4a588045736b6ce409b9.r2.dev")!
+    private static let baseURL = OnlineTileDelivery.baseURL
     private static let tilesPrefix = "tiles"
     private static let tileStore = BristolBaySatelliteTileStore.shared
 
@@ -299,9 +299,29 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     typealias Completion = (Data?, Error?) -> Void
     private static let maximumTilePayloadBytes = 4 * 1_024 * 1_024
 
-    private struct NetworkRequest {
+    /// The returned closure requests cancellation. Completion must still arrive
+    /// exactly once, including after cancellation, to release the network slot.
+    typealias Transport = (URLRequest, @escaping (Data?, URLResponse?, Error?) -> Void) -> (() -> Void)
+
+    private struct Subscriber {
+        let owner: UUID?
+        let completion: Completion
+    }
+
+    // Identity and URL fields are immutable. Subscribers and diskOperation are
+    // read or mutated only on the owning store's serial stateQueue; background
+    // disk/network closures carry this reference back to that queue.
+    private final class SourceRequest: @unchecked Sendable {
+        let id = UUID()
         let url: URL
         let cacheKey: String
+        var subscribers: [Subscriber]
+        var diskOperation: Operation?
+        init(url: URL, cacheKey: String, owner: UUID?, completion: @escaping Completion) {
+            self.url = url
+            self.cacheKey = cacheKey
+            subscribers = [Subscriber(owner: owner, completion: completion)]
+        }
     }
 
     private struct DiskEntry {
@@ -323,6 +343,7 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
         countLimit: 32
     )
     private let session: URLSession
+    private let transport: Transport?
     private let rootDirectory: URL
     private let stateQueue = DispatchQueue(
         label: "com.satchart.bristol-bay-satellite.state",
@@ -350,9 +371,10 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     )
 
     // Accessed only on stateQueue after initialization.
-    private var sourceInFlight: [String: [Completion]] = [:]
+    private var sourceInFlight: [String: SourceRequest] = [:]
     private var derivedInFlight: [String: [Completion]] = [:]
-    private var pendingNetworkRequests: [NetworkRequest] = []
+    private var pendingNetworkRequests: [SourceRequest] = []
+    private var activeNetworkTasks: [UUID: () -> Void] = [:]
     private var activeNetworkRequests = 0
     private var maximumNetworkRequests = 2
     private var maximumSourceKeys = 96
@@ -367,9 +389,10 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     private var diskByteLimit = 96 * 1_024 * 1_024
     private var diskCountLimit = 2_048
 
-    private init() {
-        let profile = MBTilesResourceProfile.current()
-        let configuration = URLSessionConfiguration.ephemeral
+    init(configuration: URLSessionConfiguration = .ephemeral, directory: URL? = nil,
+         profile: MBTilesResourceProfile = .current(), observeSystem: Bool = true,
+         transport: Transport? = nil) {
+        self.transport = transport
         // URLSession provides a second ceiling; the state-queue pump below can
         // lower concurrency dynamically for power and thermal pressure.
         configuration.httpMaximumConnectionsPerHost = profile.onlineSatelliteConnections
@@ -382,10 +405,10 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
 
         let cachesRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        rootDirectory = cachesRoot.appendingPathComponent("BristolBaySatelliteTiles/v1", isDirectory: true)
+        rootDirectory = directory ?? cachesRoot.appendingPathComponent("BristolBaySatelliteTiles/v1", isDirectory: true)
 
         applyResourceProfileLocked(profile)
-        installObservers()
+        if observeSystem { installObservers() }
         let initialDiskLimits = Self.diskLimits(for: profile)
         writeQueue.async { [self] in
             diskByteLimit = initialDiskLimits.bytes
@@ -399,12 +422,58 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
         session.invalidateAndCancel()
     }
 
-    func loadTile(url: URL, cacheKey: String, result: @escaping Completion) {
+    func loadTile(url: URL, cacheKey: String, owner: UUID? = nil, result: @escaping Completion) {
         // Register before any file I/O. This coalesces both a cold disk lookup and
         // the subsequent URL request, rather than only merging requests at the
         // network stage.
         stateQueue.async { [self] in
-            beginSourceLoadLocked(url: url, cacheKey: cacheKey, result: result)
+            beginSourceLoadLocked(url: url, cacheKey: cacheKey, owner: owner, result: result)
+        }
+    }
+
+    /// A viewport owns subscribers, not shared tile bytes. Other viewports and
+    /// anonymous MapKit/overzoom consumers keep their coalesced request alive.
+    func cancel(owner: UUID) {
+        stateQueue.async { [self] in
+            for request in Array(sourceInFlight.values) {
+                let cancelled = request.subscribers.filter { $0.owner == owner }
+                request.subscribers.removeAll { $0.owner == owner }
+                deliver(cancelled.map(\.completion), data: nil, error: URLError(.cancelled))
+                guard request.subscribers.isEmpty else { continue }
+                sourceInFlight.removeValue(forKey: request.cacheKey)
+                request.diskOperation?.cancel()
+                request.diskOperation = nil
+                pendingNetworkRequests.removeAll { $0.id == request.id }
+                // Keep the occupied slot until the transport acknowledges. A new
+                // same-key request gets a different identity and cannot be finished
+                // or cached by this task's late callback.
+                activeNetworkTasks[request.id]?()
+            }
+            pumpNetworkLocked()
+        }
+    }
+
+    struct WorkSnapshot: Sendable {
+        let sourceKeys: Set<String>
+        let pendingKeys: Set<String>
+        let activeNetworkCount: Int
+        let maximumNetworkCount: Int
+        let maximumSourceKeys: Int
+    }
+
+    /// A serialized diagnostic snapshot also makes cancellation races testable
+    /// without relying on sleeps or real network timing.
+    func workSnapshot() async -> WorkSnapshot {
+        await withCheckedContinuation { continuation in
+            stateQueue.async { [self] in
+                continuation.resume(returning: WorkSnapshot(
+                    sourceKeys: Set(sourceInFlight.keys),
+                    pendingKeys: Set(pendingNetworkRequests.map(\.cacheKey)),
+                    activeNetworkCount: activeNetworkRequests,
+                    maximumNetworkCount: maximumNetworkRequests,
+                    maximumSourceKeys: maximumSourceKeys
+                ))
+            }
         }
     }
 
@@ -482,6 +551,7 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
     private func beginSourceLoadLocked(
         url: URL,
         cacheKey: String,
+        owner: UUID?,
         result: @escaping Completion
     ) {
         if let cached = sourceMemoryCache.value(for: cacheKey) {
@@ -489,13 +559,12 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
             return
         }
 
-        if var callbacks = sourceInFlight[cacheKey] {
-            guard callbacks.count < maximumCallbacksPerKey else {
+        if let request = sourceInFlight[cacheKey] {
+            guard request.subscribers.count < maximumCallbacksPerKey else {
                 deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
                 return
             }
-            callbacks.append(result)
-            sourceInFlight[cacheKey] = callbacks
+            request.subscribers.append(Subscriber(owner: owner, completion: result))
             return
         }
 
@@ -503,30 +572,33 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
             deliver([result], data: nil, error: BristolBaySatelliteTileStoreError.saturated)
             return
         }
-        sourceInFlight[cacheKey] = [result]
-
-        readOperations.addOperation { [self] in
+        let request = SourceRequest(url: url, cacheKey: cacheKey, owner: owner, completion: result)
+        sourceInFlight[cacheKey] = request
+        let operation = BlockOperation()
+        operation.addExecutionBlock { [self, weak operation] in
+            guard operation?.isCancelled == false else { return }
             let diskData = loadFromDisk(cacheKey: cacheKey)
             stateQueue.async { [self] in
-                guard sourceInFlight[cacheKey] != nil else { return }
+                guard sourceInFlight[cacheKey]?.id == request.id else { return }
+                request.diskOperation = nil
                 if let diskData {
                     sourceMemoryCache.insert(diskData, for: cacheKey, cost: diskData.count)
-                    finishSourceLocked(cacheKey: cacheKey, data: diskData, error: nil)
+                    finishSourceLocked(request, data: diskData, error: nil)
                 } else {
-                    pendingNetworkRequests.append(NetworkRequest(url: url, cacheKey: cacheKey))
+                    pendingNetworkRequests.append(request)
                     pumpNetworkLocked()
                 }
             }
         }
+        request.diskOperation = operation
+        readOperations.addOperation(operation)
     }
 
     private func pumpNetworkLocked() {
         while activeNetworkRequests < maximumNetworkRequests,
               !pendingNetworkRequests.isEmpty {
-            // Prefer the newest viewport demand when an earlier pan left a queue
-            // behind. The queue remains bounded, and every older request still
-            // retains its exactly-once completion while it waits.
             let pending = pendingNetworkRequests.removeLast()
+            guard sourceInFlight[pending.cacheKey]?.id == pending.id else { continue }
             activeNetworkRequests += 1
 
             var request = URLRequest(url: pending.url)
@@ -535,31 +607,55 @@ nonisolated final class BristolBaySatelliteTileStore: @unchecked Sendable {
             request.setValue("image/png,*/*;q=0.8", forHTTPHeaderField: "Accept")
             request.setValue("SatChart-BristolBaySatellite/1.0", forHTTPHeaderField: "User-Agent")
 
-            session.dataTask(with: request) { [self] data, response, error in
-                let validated = validatedImageData(data, response: response)
+            let completion: @Sendable (Data?, URLResponse?, Error?) -> Void = { [self] data, response, error in
                 stateQueue.async { [self] in
-                    activeNetworkRequests = max(0, activeNetworkRequests - 1)
-                    if let validated {
-                        sourceMemoryCache.insert(validated, for: pending.cacheKey, cost: validated.count)
-                        storeOnDisk(validated, cacheKey: pending.cacheKey)
-                        finishSourceLocked(cacheKey: pending.cacheKey, data: validated, error: nil)
-                    } else {
-                        finishSourceLocked(
-                            cacheKey: pending.cacheKey,
-                            data: nil,
-                            error: error ?? ((response as? HTTPURLResponse).map { [404, 410].contains($0.statusCode) } == true
-                                ? BristolBaySatelliteTileStoreError.notFound
-                                : BristolBaySatelliteTileStoreError.invalidImageResponse)
-                        )
+                    guard activeNetworkTasks[pending.id] != nil else { return }
+                    guard sourceInFlight[pending.cacheKey]?.id == pending.id else {
+                        activeNetworkTasks.removeValue(forKey: pending.id)
+                        activeNetworkRequests -= 1
+                        pumpNetworkLocked()
+                        return
                     }
-                    pumpNetworkLocked()
+                    // Keep this slot through validation, as before: fast network
+                    // responses cannot accumulate a new unbounded decode backlog.
+                    readOperations.addOperation { [self] in
+                        let validated = validatedImageData(data, response: response)
+                        stateQueue.async { [self] in
+                            guard activeNetworkTasks.removeValue(forKey: pending.id) != nil else { return }
+                            activeNetworkRequests -= 1
+                            defer { pumpNetworkLocked() }
+                            guard sourceInFlight[pending.cacheKey]?.id == pending.id else { return }
+                            if let validated {
+                                sourceMemoryCache.insert(validated, for: pending.cacheKey, cost: validated.count)
+                                storeOnDisk(validated, cacheKey: pending.cacheKey)
+                                finishSourceLocked(pending, data: validated, error: nil)
+                            } else {
+                                finishSourceLocked(
+                                    pending, data: nil,
+                                    error: error ?? ((response as? HTTPURLResponse).map { [404, 410].contains($0.statusCode) } == true
+                                        ? BristolBaySatelliteTileStoreError.notFound
+                                        : BristolBaySatelliteTileStoreError.invalidImageResponse)
+                                )
+                            }
+                        }
+                    }
                 }
-            }.resume()
+            }
+            if let transport {
+                activeNetworkTasks[pending.id] = transport(request, completion)
+            } else {
+                let task = session.dataTask(with: request, completionHandler: completion)
+                activeNetworkTasks[pending.id] = { task.cancel() }
+                task.resume()
+            }
         }
     }
 
-    private func finishSourceLocked(cacheKey: String, data: Data?, error: Error?) {
-        let callbacks = sourceInFlight.removeValue(forKey: cacheKey) ?? []
+    private func finishSourceLocked(_ request: SourceRequest, data: Data?, error: Error?) {
+        guard sourceInFlight[request.cacheKey]?.id == request.id else { return }
+        sourceInFlight.removeValue(forKey: request.cacheKey)
+        let callbacks = request.subscribers.map(\.completion)
+        request.subscribers.removeAll()
         deliver(callbacks, data: data, error: error)
     }
 

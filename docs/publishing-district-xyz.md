@@ -29,3 +29,55 @@ The scan checks up to two z4 tile headers per prefix, using two workers and a 45
 Only one entry per district/version is shown if multiple aliases exist. The cached alias is preferred; on first discovery the base prefix (`district_xyz`) wins. Published version numbers are shared by the selector: for example, selecting v15 displays a district's v15 when present and its lowest published version otherwise. It does not show 75 choices or download all 75 maps.
 
 Offline download availability remains a separate curated list in `DistrictID.offlinePackVersions`; this discovery feature does not add empty offline download cards.
+
+
+## Edge-cached tile delivery
+
+Online tile URLs are centralized in `OnlineTileDelivery.baseURL`. District
+availability probes and the Bristol Bay imagery underlay use the same host.
+Compressed tile cache keys retain their existing prefix/z/x/y identity, so
+changing the delivery host does not invalidate already cached tiles.
+
+The production endpoint is `https://tiles.getsatchart.com`, connected to the
+existing `bristol-bay-sandbars-mbtiles` R2 bucket on September 17, 2026. The
+Cloudflare rule **SatChart PNG tile edge cache** applies only to this hostname
+and paths ending in `.png`:
+
+- Matching images are eligible for edge caching; successful responses respect
+  origin cache headers, falling back to Cloudflare's default status-code TTL.
+- HTTP status codes 400 and above use **No store**, so missing publication
+  markers and transient errors are not retained at the edge.
+- Browser TTL uses **Bypass cache**. The app's existing bounded tile memory and
+  disk caches remain in use; its URLSession HTTP cache is already disabled.
+
+The R2 `r2.dev` endpoint is rate limited and does not provide edge caching. Keep
+that existing public URL enabled: older app releases and offline package
+downloads still use it. The website's DNS and existing bucket domains are
+unchanged.
+
+When changing the delivery hostname or cache policy:
+
+1. Wait for the custom domain and its TLS certificate to become active.
+2. Compare GET responses from the current R2 URL and the new hostname for a
+   district tile and a `tiles/` underlay tile. Require HTTP 200,
+   `Content-Type: image/png`, and identical payload hashes.
+3. Repeat the GET at the same location and verify `CF-Cache-Status: HIT`.
+   HEAD is used by
+   discovery, but a repeated GET is the validation for image delivery caching.
+4. Ensure absent tiles still return 404 without a cache hit on repetition, since
+   new versions are published under previously missing paths.
+5. Update `OnlineTileDelivery.baseURL` to the verified HTTPS hostname and run the
+   online district, discovery, version handoff, and cancellation regression tests.
+
+Keep published district version prefixes immutable as described above. Do not
+apply a one-year immutable cache rule to mutable catalogs or unversioned imagery.
+Server-side caching does not require larger device caches, larger images, or more
+concurrent downloads.
+
+References:
+- https://developers.cloudflare.com/r2/buckets/public-buckets/
+- https://developers.cloudflare.com/cache/interaction-cloudflare-products/r2/
+
+Deployment verification: district `egegik_v4_xyz/4/0/4.png` and underlay
+`tiles/4/0/4.png` returned HTTP 200 with byte-for-byte matches to the original
+R2 endpoint and repeated `CF-Cache-Status: HIT` responses.

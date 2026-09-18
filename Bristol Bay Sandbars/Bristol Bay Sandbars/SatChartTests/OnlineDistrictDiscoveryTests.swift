@@ -72,7 +72,9 @@ final class OnlineDistrictDiscoveryTests: XCTestCase {
         XCTAssertEqual(Set(store.maps.map(\.tilePrefix)), probe.available)
         XCTAssertEqual(probe.peak, 2)
         XCTAssertLessThanOrEqual(probe.requests.count, 192)
-        XCTAssertTrue(probe.requests.allSatisfy { $0.host == "pub-832b588ef9ec4a588045736b6ce409b9.r2.dev" })
+        XCTAssertTrue(probe.requests.allSatisfy {
+            $0.scheme == "https" && $0.host == OnlineTileDelivery.baseURL.host
+        })
         XCTAssertEqual(OnlineDistrictMapCatalog.versions(in: store.maps), [1, 8, 12, 15])
         XCTAssertEqual(OnlineDistrictMapCatalog.nextVersion(after: 15, in: store.maps), 1)
         XCTAssertEqual(OnlineDistrictMapCatalog.selectedMaps(version: 15, in: store.maps).count, 5)

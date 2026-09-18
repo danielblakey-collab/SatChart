@@ -19,7 +19,7 @@ struct OnlineDistrictMap: Equatable, @unchecked Sendable {
     }
 
     func tileURL(for path: MKTileOverlayPath) -> URL {
-        URL(string: "https://pub-832b588ef9ec4a588045736b6ce409b9.r2.dev")!
+        OnlineTileDelivery.baseURL
             .appendingPathComponent(tilePrefix)
             .appendingPathComponent(String(path.z))
             .appendingPathComponent(String(path.x))
@@ -161,15 +161,21 @@ final class OnlineDistrictTileOverlay: MKTileOverlay {
         stateLock.unlock()
     }
 
-    init(source: OnlineDistrictMap, tileLoader: TileLoader? = nil) {
+    init(source: OnlineDistrictMap, store: BristolBaySatelliteTileStore = .shared, tileLoader: TileLoader? = nil) {
+        let owner = UUID()
         let load = tileLoader ?? { url, key, result in
-            BristolBaySatelliteTileStore.shared.loadTile(url: url, cacheKey: key, result: result)
+            store.loadTile(url: url, cacheKey: key, result: result)
+        }
+        let loadContinuity = tileLoader ?? { url, key, result in
+            store.loadTile(url: url, cacheKey: key, owner: owner, result: result)
         }
         let prefix = source.tilePrefix
         let baseURL = source.tileURL(for: MKTileOverlayPath(x: 0, y: 0, z: 0, contentScaleFactor: 1))
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         var policy = RasterMapContinuity.Policy()
         policy.imageBudget = Self.imageBudget
+        policy.cancelsSupersededLoads = true
+        if tileLoader == nil { policy.cancelLoads = { store.cancel(owner: owner) } }
         // Five retained districts fit below the shared cap, leaving room for a
         // coarse replacement even when all five are visible. Admission further
         // reduces detail while old/new versions overlap during a handoff.
@@ -181,7 +187,7 @@ final class OnlineDistrictTileOverlay: MKTileOverlay {
                                              maximumZoom: source.maximumZoom, policy: policy) { tile, completion in
             let url = baseURL.appendingPathComponent("\(tile.z)/\(tile.x)/\(tile.y).png")
             let key = "districts/\(prefix)/z\(tile.z)/x\(tile.x)/y\(tile.y)"
-            load(url, key) { data, error in
+            loadContinuity(url, key) { data, error in
                 RasterMapContinuity.decode(data, error: error, completion: completion)
             }
         }
